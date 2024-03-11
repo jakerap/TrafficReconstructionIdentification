@@ -9,6 +9,7 @@ import numpy as np
 np.random.seed(12345)
 import reconstruction_neural_network as rn
 import sumo as s
+import matplotlib.pyplot as plt
 
 #####################################
 ####     General parameters     #####
@@ -31,7 +32,14 @@ trained_neural_network = rn.ReconstructionNeuralNetwork(t_train, x_train, rho_tr
 trained_neural_network.start()
 trained_neural_network.train()
 
+# [_, _, figError] = trained_neural_network.plot(axisPlot, rho)
+# sumo.plotProbeVehicles()
+# figError.savefig('error.eps', bbox_inches='tight')
+# trained_neural_network.close()
+
+
 [_, _, figError] = trained_neural_network.plot(axisPlot, rho)
 sumo.plotProbeVehicles()
-figError.savefig('error.eps', bbox_inches='tight')
+figError.savefig('error.png', bbox_inches='tight')  # Changed file extension to .png
+plt.show()
 trained_neural_network.close()

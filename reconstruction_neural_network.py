@@ -19,7 +19,7 @@ def hms(seconds):
 
 def amin(l):
     min_list = [np.amin(l[i]) for i in range(len(l))]
-    return np.amin(min_list)
+    return np.amin(min_list)  
 
 
 def amax(l):
@@ -266,8 +266,6 @@ class ReconstructionNeuralNetwork():
 
     def plot(self, axisPlot, rho):
         '''
-        
-
         Parameters
         ----------
         axisPlot : tuple of two 1D-numpy arrays of shape (?,)
@@ -323,20 +321,23 @@ class ReconstructionNeuralNetwork():
         plt.tight_layout()
         # plt.title('Reconstruction')
         # figSpeed.savefig('speed.eps', bbox_inches='tight')
+        figSpeed.savefig('speed_flow.png', bbox_inches='tight')
 
         figReconstruction = plt.figure(figsize=(7.5, 5))
         X, Y = np.meshgrid(t, x)
         plt.pcolor(X, Y, rho_prediction, vmin=0.0, vmax=1.0, shading='auto', cmap='rainbow', rasterized=True)
         for i in range(self.Nxi):
-            plt.plot(t_pred[i], X_prediction[i], color="saddlebrown")
+            plt.plot(t_pred[i], X_prediction[i], color="saddlebrown", label='Predicted Trajectory')
         plt.xlabel(r'Time [min]')
         plt.ylabel(r'Position [km]')
         plt.xlim(min(t), max(t))
         plt.ylim(min(x), max(x))
         plt.colorbar()
         plt.tight_layout()
-        # plt.title('Reconstruction')
+        plt.title('Reconstruction')
+        plt.legend()
         # figReconstruction.savefig('reconstruction.eps', bbox_inches='tight')
+        figReconstruction.savefig('reconstruction.png', bbox_inches='tight')
         
         figLambda = plt.figure(figsize=(7.5, 5))
         color_plot = plt.rcParams['axes.prop_cycle'].by_key()['color']
@@ -354,6 +355,7 @@ class ReconstructionNeuralNetwork():
         plt.tight_layout()
         # plt.title('Absolute error')
         # figLambda.savefig('lambda.eps', bbox_inches='tight')
+        figLambda.savefig('lambda.png', bbox_inches='tight')
         
         figError = plt.figure(figsize=(7.5, 5))
         X, Y = np.meshgrid(t, x)
@@ -368,7 +370,8 @@ class ReconstructionNeuralNetwork():
         plt.colorbar()
         plt.tight_layout()
         print("Normalized L^2 error: ", np.mean(np.square(rho_prediction-rho)))
-        # plt.title('Absolute error')
+        plt.title('Absolute error')
         # figError.savefig('error.eps', bbox_inches='tight') 
+        figError.savefig('error.png', bbox_inches='tight') 
         
         return [figSpeed, figReconstruction, figError]

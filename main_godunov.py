@@ -52,7 +52,7 @@ trained_neural_network.train()
 
 [_, _, figError] = trained_neural_network.plot(axisPlot, rho)
 simu_godunov.pv.plot()
-# figError.savefig('error.eps', bbox_inches='tight')
+figError.savefig('error_godunov.png', bbox_inches='tight')
 
 plt.show()
 trained_neural_network.close()
