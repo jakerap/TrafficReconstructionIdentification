@@ -18,14 +18,16 @@ import matplotlib.pyplot as plt
 scenario = 'highway'
 
 sumo = s.Sumo(scenario)
-Nx, Nt = sumo.Nx, sumo.Nt
-L, Tmax = sumo.L, sumo.Tmax
+Nx, Nt = sumo.Nx, sumo.Nt # Number of spatial and temporal points (250, 420)
+L, Tmax = sumo.L, sumo.Tmax # Length of the road and maximum time (2.5, 7.0)
 
-rho = sumo.getDensity()  # density(time, position) (300, 1000)
+breakpoint()
+
+rho = sumo.getDensity()  # density(time, position) (250, 420)
 sumo.plotDensity()
 t_train, x_train, rho_train, v_train = sumo.getMeasurements()
 axisPlot = sumo.getAxisPlot()
-Vf = np.amax(v_train[14])
+Vf = np.amax(v_train[14]) # find the highest speed in the training data
 
 trained_neural_network = rn.ReconstructionNeuralNetwork(t_train, x_train, rho_train, v_train,
                                                     L, Tmax, N_f=500, N_g=50, opt=9)

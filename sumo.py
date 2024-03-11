@@ -24,10 +24,10 @@ class Sumo():
         return data
 
     def process_probe_data(self, data):
-        probe_x = []
-        probe_t = []
-        probe_u = []
-        probe_v = []
+        probe_x = [] # position
+        probe_t = [] # time
+        probe_u = [] # density
+        probe_v = [] # speed
         
         pv_x = []
         pv_t = []
@@ -65,8 +65,8 @@ class Sumo():
         return self.u
     
     def getAxisPlot(self):
-        t = np.linspace(0, self.Tmax, self.Nt)
-        x = np.linspace(0, self.L, self.Nx)
+        t = np.linspace(0, self.Tmax, self.Nt) # Nt is the number of temporal points
+        x = np.linspace(0, self.L, self.Nx) # Nx is the number of spatial points
         return (x, t)
 
     def plotDensity(self):

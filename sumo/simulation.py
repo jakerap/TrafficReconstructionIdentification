@@ -13,7 +13,7 @@ if 'SUMO_HOME' in os.environ:
 else:
      sys.exit("Please declare environment variable 'SUMO_HOME'")
 
-import traci
+import traci # traffic control interface
 import numpy as np
 np.random.seed(1234)
 import matplotlib.pyplot as plt
@@ -33,9 +33,9 @@ Tstart = 8 # in min
 sigma = 0.01 # in km
 tau = 0.06 # in min
 
-Nt = int(np.ceil(Tmax/deltaT))
-NtStart = int(np.floor(Tstart/deltaT))
-Nx = int(np.ceil(L/deltaX))
+Nt = int(np.ceil(Tmax/deltaT)) # Number of temporal points
+NtStart = int(np.floor(Tstart/deltaT)) # Start of the simulation
+Nx = int(np.ceil(L/deltaX)) # Number of spatial points
 
 numberOfVehicles = np.zeros((Nx, Nt-NtStart))
 trafficLightPhase = 0
@@ -119,12 +119,12 @@ for pv in PVList.pvs:
         rhoPV.append(density[i,j-NtStart])
 plt.scatter(tVarPlot, xVar, color='k', s=0.4)
 
-with open(scenario+'/spaciotemporal.csv', 'w', newline='') as file:
-    writer = csv.writer(file)
-    writer.writerows([[L, (Tmax-Tstart)]])
-    writer.writerows(density)
+# with open(scenario+'/spaciotemporal.csv', 'w', newline='') as file:
+#     writer = csv.writer(file)
+#     writer.writerows([[L, (Tmax-Tstart)]])
+#     writer.writerows(density)
     
-with open(scenario+'/pv.csv', 'w', newline='') as file:
-    writer = csv.writer(file)
-    writer.writerows(np.array([xVar, tVar, rhoPV, vPV]).T)
+# with open(scenario+'/pv.csv', 'w', newline='') as file:
+#     writer = csv.writer(file)
+#     writer.writerows(np.array([xVar, tVar, rhoPV, vPV]).T)
     

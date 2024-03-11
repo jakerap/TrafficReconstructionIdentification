@@ -30,6 +30,8 @@ class ReconstructionNeuralNetwork():
     
     def __init__(self, t, x, rho, v, L, Tmax, v_max=None, N_f=1000, N_g=100, N_v=50, opt=0):
         '''
+
+        
         Initialize a neural network for density reconstruction
 
         Parameters
