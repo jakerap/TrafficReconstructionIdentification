@@ -6,7 +6,7 @@ import os
 os.environ['TF_CPP_MIN_LOG_LEVEL'] = '3'  
 logging.getLogger('tensorflow').setLevel(logging.FATAL)
 
-# import tensorflow as tf
+import tensorflow as tf
 import torch
 import torch.nn as nn
 import torch.optim as optim
@@ -131,13 +131,13 @@ class NeuralNetwork(nn.Module):
         self.encoder2_biases = self.xavier_initializer([1, layers_density[1]], init=np.zeros((1, layers_density[1])))
         
         # PDE part     
-        # self.t_tf = [tf.placeholder(tf.float32, shape=[None, 1]) for _ in range(self.N)]
-        # self.x_tf = [tf.placeholder(tf.float32, shape=[None, 1]) for _ in range(self.N)]
-        # self.u_tf = [tf.placeholder(tf.float32, shape=[None, 1]) for _ in range(self.N)]
-        # self.v_tf = [tf.placeholder(tf.float32, shape=[None, 1]) for _ in range(self.N)]
-        # self.x_f_tf = tf.placeholder(tf.float32, shape=[None, self.x_f.shape[1]])
-        # self.t_f_tf = tf.placeholder(tf.float32, shape=[None, self.t_f.shape[1]])
-        # self.u_v_tf = tf.placeholder(tf.float32, shape=[None, self.u_v.shape[1]])
+        self.t_tf = [tf.placeholder(tf.float32, shape=[None, 1]) for _ in range(self.N)]
+        self.x_tf = [tf.placeholder(tf.float32, shape=[None, 1]) for _ in range(self.N)]
+        self.u_tf = [tf.placeholder(tf.float32, shape=[None, 1]) for _ in range(self.N)]
+        self.v_tf = [tf.placeholder(tf.float32, shape=[None, 1]) for _ in range(self.N)]
+        self.x_f_tf = tf.placeholder(tf.float32, shape=[None, self.x_f.shape[1]])
+        self.t_f_tf = tf.placeholder(tf.float32, shape=[None, self.t_f.shape[1]])
+        self.u_v_tf = tf.placeholder(tf.float32, shape=[None, self.u_v.shape[1]])
         
         self.u_pred = [self.net_u(self.t_tf[i], self.net_x_pv(self.t_tf[i], i)) - self.noise_rho_bar[i]
                        for i in range(self.N)] 
@@ -152,14 +152,14 @@ class NeuralNetwork(nn.Module):
         # MSE part
         self.MSEu1 = tf.reduce_mean(tf.square(tf.concat(self.u_tf, 0) - self.net_u(tf.concat(self.t_tf, 0),tf.concat(self.x_tf, 0)))*tf.exp(0*tf.concat(self.u_tf, 0))) # MSE for Density Predictions (rho_pred - rho_true)^2
         self.MSEu2 = tf.reduce_mean(tf.square(tf.concat(self.u_tf, 0) - tf.concat(self.u_pred, 0)))                                                                     # MSE for Adjusted Density Predictions (rho_pred - rho_ture - noise)^2
-        self.MSEf = tf.reduce_mean(tf.square(self.f_pred))                                                                                                              # Residual of PDE Predictions flux function (f_pred)^2
+        self.MSEf = tf.reduce_mean(tf.square(self.f_pred))                                                                                                              # Residual of PDE Predictions flux function 
         
         self.MSEtrajectories = tf.reduce_mean(tf.square(tf.concat(self.x_tf, 0) - tf.concat(self.x_pred, 0))*tf.exp(0*tf.concat(self.u_tf, 0)))                         # MSE for Trajectories Predictions (x_pred - x_true)^2
-        self.MSEg = tf.reduce_mean(tf.square(tf.concat(self.g_pred, 0)))                                                                                                # Residual of PDE Predictions g function (g_pred)^2
+        self.MSEg = tf.reduce_mean(tf.square(tf.concat(self.g_pred, 0)))                                                                                                # Residual of PDE Predictions g function 
             
         self.MSEv1 = tf.reduce_mean(tf.square(tf.concat(self.v_tf, 0) - self.net_v(tf.concat(self.u_tf, 0))))                                                           # MSE for Speed Predictions (v_pred - v_true)^2
         self.MSEv2 = tf.reduce_mean(tf.square(tf.concat(self.v_tf, 0) - self.net_v(tf.concat(self.u_pred, 0))))                                                         # MSE for Adjusted Speed Predictions (v_pred - v_true - noise)^2
-        self.MSEv = tf.reduce_mean(tf.square(tf.nn.relu(self.net_ddf(self.u_v_tf)))) #+ tf.reduce_mean(tf.square(tf.nn.relu(self.net_v(self.u_v_tf) - max_speed)))      # MSE for PDE Predictions speed function (v_pred)^2
+        self.MSEv = tf.reduce_mean(tf.square(tf.nn.relu(self.net_ddf(self.u_v_tf)))) #+ tf.reduce_mean(tf.square(tf.nn.relu(self.net_v(self.u_v_tf) - max_speed)))      # MSE for PDE Predictions speed function 
 
         # Lambda update procedure
         self.losses = [self.MSEu1, self.MSEu2, self.MSEf,       # density loss functions
@@ -364,6 +364,7 @@ class NeuralNetwork(nn.Module):
     def net_ddf(self, u):
         '''
         Standardized second derivative of the flux
+        N_v[v] := f_rhorho = (rho*v(rho))_rhorho = 2*v_rho + rho*v(rho)_rhorho
         '''
         f = u*self.net_v(u)
         df = tf.gradients(f, u)[0]
@@ -434,16 +435,7 @@ class NeuralNetwork(nn.Module):
     def net_g(self, t):
         '''
         return the physics function g for all agents at time t
-
-        Parameters
-        ----------
-        t : tensor
-            standardized time.
-
-        Returns
-        -------
-        list of tensor
-            list of standardized estimated physics g tensor.
+        N_y[y_i] := x_t - v(rho(t, x(t)))
 
         '''
         
