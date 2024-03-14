@@ -21,8 +21,6 @@ sumo = s.Sumo(scenario)
 Nx, Nt = sumo.Nx, sumo.Nt # Number of spatial and temporal points (250, 420)
 L, Tmax = sumo.L, sumo.Tmax # Length of the road and maximum time (2.5, 7.0)
 
-breakpoint()
-
 rho = sumo.getDensity()  # density(time, position) (250, 420)
 sumo.plotDensity()
 t_train, x_train, rho_train, v_train = sumo.getMeasurements()
