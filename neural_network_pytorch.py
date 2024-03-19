@@ -8,6 +8,7 @@ logging.getLogger('tensorflow').setLevel(logging.FATAL)
 
 import tensorflow as tf
 import torch
+import torch.nn.functional as F
 import torch.nn as nn
 import torch.optim as optim
 from torch.autograd import Variable
@@ -65,7 +66,6 @@ class NeuralNetwork(nn.Module):
 
         '''
         
-        # tf.reset_default_graph()
         
         self.beta = beta # Regularization parameter
         self.N_epochs = N_epochs # Number of epochs
@@ -86,50 +86,21 @@ class NeuralNetwork(nn.Module):
         self.N = len(self.x)  # Number of agents
         self.max_speed = max_speed
 
+
         self.gamma_var = torch.tensor(1e-2, dtype=torch.float32, requires_grad=True) # Viscosity parameter
         self.noise_rho_bar = [torch.tensor(torch.randn(1, 1) * 0.001, dtype=torch.float32, requires_grad=True) 
                               for _ in range(self.N)] # Noise for the density
 
-        # Initilization of the neural networks
-        self.weights = {}
-        self.biases = {}
-        layers = {'speed':layers_speed, 'trajectories':layers_trajectories, 
-                  'density':layers_density}
-        init = {'speed':init_speed, 'trajectories':init_trajectories, 
-                'density':init_density}
-        
-        # Theta / Density  network
-        self.weights['density'], self.biases['density'] = self.initialize_neural_network(layers['density'],
-                                                                                         init['density'][0],
-                                                                                         init['density'][1],
-                                                                                         act="tanh")
-        list_var_density = self.weights['density'] + self.biases['density']
-        
-        # Phi / Position  network
-        self.weights['trajectories'] = []
-        self.biases['trajectories'] = []
-        list_var_trajectories = []
-        for i in range(self.N):
-            weights_trajectories, biases_trajectories = self.initialize_neural_network(layers['trajectories'],
-                                                                                       initWeights=init['trajectories'][0],
-                                                                                       initBias=init['trajectories'][1],
-                                                                                       act="tanh")
-            self.weights['trajectories'].append(weights_trajectories)
-            self.biases['trajectories'].append(biases_trajectories)
-            list_var_trajectories += weights_trajectories + biases_trajectories
-                        
-        # V / Speed  network
-        self.weights['speed'], self.biases['speed'] = self.initialize_neural_network(layers['speed'],
-                                                                                     initWeights=init['speed'][0],
-                                                                                     initBias=init['speed'][1],
-                                                                                     act="tanh")
-        list_var_speed = self.weights['speed'] + self.biases['speed']
-        
-        self.encoder1_weights = self.xavier_initializer([2, layers_density[1]], init=np.zeros((2, layers_density[1])))
-        self.encoder1_biases = self.xavier_initializer([1, layers_density[1]], init=np.zeros((1, layers_density[1])))
-        self.encoder2_weights = self.xavier_initializer([2, layers_density[1]], init=np.zeros((2, layers_density[1])))
-        self.encoder2_biases = self.xavier_initializer([1, layers_density[1]], init=np.zeros((1, layers_density[1])))
-        
+        # build density network
+        self.density_network = self.build_network(layers_density, act=nn.Tanh())
+
+        # build trajectories network
+        self.trajectories_network = [self.build_network(layers_trajectories, act=nn.Tanh()) for _ in range(self.N)]
+
+        # build velocity network
+        self.velocity_network = self.build_network(layers_speed, act=nn.Tanh())
+
+
         # PDE part     
         self.t_tf = [tf.placeholder(tf.float32, shape=[None, 1]) for _ in range(self.N)]
         self.x_tf = [tf.placeholder(tf.float32, shape=[None, 1]) for _ in range(self.N)]
@@ -140,7 +111,7 @@ class NeuralNetwork(nn.Module):
         self.u_v_tf = tf.placeholder(tf.float32, shape=[None, self.u_v.shape[1]])
         
         self.u_pred = [self.net_u(self.t_tf[i], self.net_x_pv(self.t_tf[i], i)) - self.noise_rho_bar[i]
-                       for i in range(self.N)] 
+                   for i in range(self.N)] 
         self.f_pred = self.net_f(self.t_f_tf, self.x_f_tf)        
         
         # Agents part
@@ -150,284 +121,115 @@ class NeuralNetwork(nn.Module):
         self.g_pred = self.net_g(self.t_g_tf)
 
         # MSE part
-        self.MSEu1 = tf.reduce_mean(tf.square(tf.concat(self.u_tf, 0) - self.net_u(tf.concat(self.t_tf, 0),tf.concat(self.x_tf, 0)))*tf.exp(0*tf.concat(self.u_tf, 0))) # MSE for Density Predictions (rho_pred - rho_true)^2
-        self.MSEu2 = tf.reduce_mean(tf.square(tf.concat(self.u_tf, 0) - tf.concat(self.u_pred, 0)))                                                                     # MSE for Adjusted Density Predictions (rho_pred - rho_ture - noise)^2
-        self.MSEf = tf.reduce_mean(tf.square(self.f_pred))                                                                                                              # Residual of PDE Predictions flux function 
+        self.MSEu1 = torch.mean((torch.cat(self.u_tf, dim=0) - self.net_u(torch.cat([self.t_tf, self.x_tf], dim=1)))**2)    # MSE for Density Predictions (rho_pred - rho_true)^2
+        self.MSEu2 = torch.mean((torch.cat(self.u_tf, dim=0) - torch.cat(self.u_pred, dim=0))**2)                           # MSE for Adjusted Density Predictions (rho_pred - rho_ture - noise)^2
+        self.MSEf =  torch.mean(self.f_pred**2)                                                                             # Residual of PDE Predictions flux function 
         
-        self.MSEtrajectories = tf.reduce_mean(tf.square(tf.concat(self.x_tf, 0) - tf.concat(self.x_pred, 0))*tf.exp(0*tf.concat(self.u_tf, 0)))                         # MSE for Trajectories Predictions (x_pred - x_true)^2
-        self.MSEg = tf.reduce_mean(tf.square(tf.concat(self.g_pred, 0)))                                                                                                # Residual of PDE Predictions g function 
+        self.MSEtrajectories = torch.mean((torch.cat(self.x_tf, dim=0) - torch.cat(self.x_pred, dim=0))**2)                 # MSE for Trajectories Predictions (x_pred - x_true)^2
+        self.MSEg = torch.mean(torch.cat(self.g_pred, dim=0)**2)                                                            # Residual of PDE Predictions g function 
             
-        self.MSEv1 = tf.reduce_mean(tf.square(tf.concat(self.v_tf, 0) - self.net_v(tf.concat(self.u_tf, 0))))                                                           # MSE for Speed Predictions (v_pred - v_true)^2
-        self.MSEv2 = tf.reduce_mean(tf.square(tf.concat(self.v_tf, 0) - self.net_v(tf.concat(self.u_pred, 0))))                                                         # MSE for Adjusted Speed Predictions (v_pred - v_true - noise)^2
-        self.MSEv = tf.reduce_mean(tf.square(tf.nn.relu(self.net_ddf(self.u_v_tf)))) #+ tf.reduce_mean(tf.square(tf.nn.relu(self.net_v(self.u_v_tf) - max_speed)))      # MSE for PDE Predictions speed function 
+        self.MSEv1 = torch.mean((torch.cat(self.v_tf, dim=0) - self.net_v(torch.cat(self.u_tf, dim=0)))**2)                 # MSE for Speed Predictions (v_pred - v_true)^2
+        self.MSEv2 = torch.mean((torch.cat(self.v_tf, dim=0) - self.net_v(torch.cat(self.u_pred, dim=0)))**2)               # MSE for Adjusted Speed Predictions (v_pred - v_true - noise)^2
+        self.MSEv = torch.mean(torch.relu(self.net_ddf(self.u_v_tf))**2)                                                    # MSE for PDE Predictions speed function 
 
-        # Lambda update procedure
-        self.losses = [self.MSEu1, self.MSEu2, self.MSEf,       # density loss functions
-                       self.MSEv1, self.MSEv2, self.MSEv,       # speed loss functions
-                       self.MSEtrajectories, self.MSEg,         # trajectory loss functions
-                       tf.square(self.gamma_var)]               # viscosity parameter
-        self.constraints = [0, 1, 1, 0, 1, 1, 0, 1, 1]
- 
-        self.lambdas_tf = [tf.placeholder(tf.float32, shape=()) for _ in self.losses]
-        self.lambdas_init = [0] * len(self.losses)
-        for i in range(len(self.losses)):
-            if self.constraints[i] == 0:
-                if len(sigmas) != len(self.losses):
-                    # By default, the weighting terms are set to 1
-                    self.lambdas_init[i] = 1
-                else:
-                    self.lambdas_init[i] = sigmas[i]
-            else:
-                self.lambdas_init[i] = 0
-                    
-        self.saved_lambdas = [[lambda_init] for lambda_init in self.lambdas_init]
+    def calculate_losses(self, t, x, u, v, X_f, t_g, u_v):
+        """
+        Calculate and return the model losses based on inputs and physics.
+        Parameters:
+            t, x, u, v: Tensors representing time, space, density, and velocity at training points.
+            X_f, t_g, u_v: Tensors representing physics-informed points and conditions.
+        Returns:
+            A dictionary of various loss components.
+        """
+        # Predictions
+        u_pred = torch.stack([self.net_u(t[i], x[i]) for i in range(len(t))]) - torch.stack(self.noise_rho_bar)
+        v_pred = self.net_v(u)
+        f_pred = self.net_f(X_f[:, 1], X_f[:, 0])  # Assuming X_f is [x, t]
+        x_pred = torch.stack([self.net_x_pv(t_g[i], i) for i in range(len(t_g))])
+        g_pred = self.net_g(t_g)
 
-        self.loss = np.dot(np.array(self.lambdas_tf), np.array(self.losses))
+        # Losses
+        MSEu1 = F.mse_loss(u, u_pred)  # MSE for Density Predictions (rho_pred - rho_true)^2
+        MSEu2 = F.mse_loss(u, torch.stack(self.u_pred))  # MSE for Adjusted Density Predictions (rho_pred - rho_true - noise)^2
+        MSEf = torch.mean(f_pred**2)  # Residual of PDE Predictions flux function
+        MSEtrajectories = F.mse_loss(x, x_pred)  # MSE for Trajectories Predictions (x_pred - x_true)^2
+        MSEg = torch.mean(g_pred**2)  # Residual of PDE Predictions g function
+        MSEv1 = F.mse_loss(v, v_pred)  # MSE for Speed Predictions (v_pred - v_true)^2
+        # For MSEv2, adjust the code to compute adjusted speed predictions as needed
+        MSEv2 = F.mse_loss(v, self.net_v(torch.stack(self.u_pred)))  # Placeholder, adjust as needed
+        # For MSEv, you will need to implement net_ddf method
+        MSEv = torch.mean(torch.relu(self.net_ddf(u_v))**2)  # Placeholder, adjust as needed
         
-        if opt == 1 or opt == 2 or opt == 9: # We use the penalty method
-            self.c_tf = tf.placeholder(tf.float32, shape=()) 
-            for i in range(len(self.losses)):
-                self.loss = self.loss + self.c_tf * self.constraints[i] * tf.square(self.losses[i]) / 2
-        
-        variables = list_var_density + list_var_speed + list_var_trajectories
-        self.dL = []
-        for g in tf.gradients(self.loss, variables):
-            if g is not None:
-                self.dL.append(g)
-        
-        self.losses_values = []
-        self.loss_values = []
-        
-        self.optimizer = []   
-        self.optimizer.append(OptimizationProcedure(self, self.MSEv1 + self.MSEtrajectories, 
-                                                        0, 
-                                                        {'maxiter': 40000, 
-                                                         'maxfun': 40000,
-                                                         'maxcor': 25,
-                                                         'maxls': 20,
-                                                         'ftol': 5.0 * np.finfo(float).eps},
-                                                        opt=0))         
-        self.optimizer.append(OptimizationProcedure(self, self.loss, 
-                                                        self.N_epochs, 
-                                                        {'maxiter': 40000, 
-                                                         'maxfun': 40000,
-                                                         'maxcor': 75,
-                                                         'maxls': 50,
-                                                         'ftol': 1.0 * np.finfo(float).eps},
-                                                        opt=opt))
-        
-    def start(self):
-         # Start a TF session
-        self.sess = tf.Session(config=tf.ConfigProto(allow_soft_placement=True))
-        # Initialize the TF session
-        init = tf.global_variables_initializer() 
-        self.sess.run(init)      
-        
-    def close(self):
-        self.sess.close()
-        tf.reset_default_graph()
-        
-    def initialize_neural_network(self, layers, initWeights=[], initBias=[], act="tanh"):
-        '''
-        Initialize a neural network
+        return {
+            "MSEu1": MSEu1, "MSEu2": MSEu2, "MSEf": MSEf, 
+            "MSEtrajectories": MSEtrajectories, "MSEg": MSEg,
+            "MSEv1": MSEv1, "MSEv2": MSEv2, "MSEv": MSEv
+        }
+     
+    # build pytorch network    
+    def build_network(self, layers, act=nn.Tanh()):
+        net = []
+        for i in range(0, len(layers)-1):
+            net.append(nn.Linear(layers[i], layers[i+1]))
+            net.append(act)
+        return nn.Sequential(*net)
 
-        Parameters
-        ----------
-        layers : list of integers of length NL
-            List of number of nodes per layer.
-        initWeights : list, optional
-            List of matrices corresponding to the initial weights in each layer. 
-            The default is [].
-        initBias : list, optional
-            List of matrices corresponding to the initial biases in each layer. 
-            The default is [].
-        act : string, optional
-            Activation function. Can be tanh or relu. The default is "tanh".
-
-        Returns
-        -------
-        weights : list of tensors
-            List of weights as tensors with initial value.
-        biases : list of tensors
-            List of weights as tensors with initial value.
-
-        '''
-        
-        weights, biases = [], []
-        
-        num_layers = len(layers)
-        if len(initWeights) == 0:
-            initWeights = [np.nan]*num_layers
-            initBias = [np.nan]*num_layers
-            
-        for l in range(num_layers-1):
-            
-            if np.isnan(initWeights[l]).any():
-                initWeights[l] = np.zeros((layers[l], layers[l+1]), dtype=np.float32)
-                initBias[l] = np.zeros((1, layers[l+1]), dtype=np.float32)
-                
-            W = self.xavier_initializer(size=[layers[l], layers[l+1]], init=initWeights[l], act=act)
-            b = tf.Variable(initBias[l], dtype=tf.float32) 
-
-            weights.append(W)
-            biases.append(b)
-            
-        return weights, biases
-    
-    def xavier_initializer(self, size, init, act="tanh"):
-        '''
-        Return random values in accordance with xavier initialization if tanh
-        or he initialization if relu
-
-        Parameters
-        ----------
-        size : list of integers
-            size of the variable.
-        init : numpy array
-            initial value.
-        act : string, optional
-            Activation function, can be tanh or relu. The default is "tanh".
-
-        Returns
-        -------
-        Tensor
-            Initialized tensor.
-
-        '''
-        
-        in_dim = size[0]
-        out_dim = size[1]
-
-        xavier_stddev = np.sqrt(4/(in_dim + out_dim))
-        xavier_bound = np.sqrt(6/(in_dim + out_dim))
-        
-        if act == "relu":
-            return tf.Variable(tf.random.truncated_normal([in_dim, out_dim], mean=init, stddev=xavier_stddev, dtype=tf.float32), dtype=tf.float32)
-        else:
-            return tf.Variable(init + tf.random.uniform([in_dim, out_dim], minval=init-xavier_bound, maxval=init+xavier_bound, dtype=tf.float32), dtype=tf.float32)
-            #return tf.Variable(tf.random.truncated_normal([in_dim, out_dim], mean=init, stddev=xavier_bound*np.sqrt(2/6), dtype=tf.float32), dtype=tf.float32)
-
-    def neural_network(self, X, weights, biases, act=tf.nn.tanh, encoders=False):
-        '''
-        Compute the output of a given neural network in terms of tensor.
-
-        Parameters
-        ----------
-        X : tensor
-            Input.
-        weights : list of tensors
-            list of weights.
-        biases : list of tensors
-            list of biases.
-        act : TF activation function, optional
-            tf.nn.relu or tf.nn.tanh. The default is tf.nn.tanh.
-
-        Returns
-        -------
-        tensor
-            output of the neural network.
-
-        '''
-        
-        num_layers = len(weights) + 1
-        
-        if encoders:
-            encoder1 = tf.nn.tanh(tf.add(tf.matmul(X, self.encoder1_weights), self.encoder1_biases))
-            encoder2 = tf.nn.tanh(tf.add(tf.matmul(X, self.encoder2_weights), self.encoder2_biases))
-        else:
-            encoder1 = 1
-            encoder2 = 0
-
-        H = X
-        for l in range(num_layers - 2):
-            W, b = weights[l], biases[l]
-            Z = act(tf.add(tf.matmul(H, W), b))
-            H = tf.math.multiply(Z, encoder1) + \
-                    tf.math.multiply(1 - Z, encoder2)
-            
-        W, b = weights[-1], biases[-1]
-        return tf.add(tf.matmul(H, W), b)
-    
-    def net_v(self, u):
+    # predictors
+    def net_v(self, rho):
         '''
         Standardized velocity
         '''
-        
-        v_tanh = tf.square(self.neural_network(u, self.weights['speed'],
-                    self.biases['speed'], act=tf.nn.tanh))
+        v_tanh = torch.square(self.velocity_network(rho))
         if self.max_speed is None:
-            return v_tanh*(1-u)
+            return v_tanh*(1-rho)
         else:
-            return (v_tanh*(1+u)/2 + self.max_speed)*(1-u)/2
-        # return self.max_speed*(1-u)/2
+            return (v_tanh*(1+rho)/2 + self.max_speed)*(1-rho)/2
     
-    def net_ddf(self, u):
+    def net_ddf(self, rho):
         '''
         Standardized second derivative of the flux
         N_v[v] := f_rhorho = (rho*v(rho))_rhorho = 2*v_rho + rho*v(rho)_rhorho
         '''
-        f = u*self.net_v(u)
-        df = tf.gradients(f, u)[0]
-        ddf = tf.gradients(df, u)[0]
-        return ddf
+        f = rho*self.net_v(rho)
+        f_drho = torch.autograd.grad(f, rho, create_graph=True)[0]
+        f_drhorho = torch.autograd.grad(f_drho, rho, create_graph=True)[0]
+        return f_drhorho
     
-    def net_F(self, u):
+    def net_F(self, rho):
         '''
         Characteristic speed
         '''
-        v = self.net_v(u)
-        v_u = tf.gradients(v, u)[0]
-        return v + (u+1)*v_u
+        v_pred = self.net_v(rho)
+        v_pred_du = torch.autograd.grad(v_pred, rho, create_graph=True)[0]
+        return v_pred + (rho+1)*v_pred_du
         # return -self.max_speed * u
 
     def net_u(self, t, x):
         '''
         return the standardized value of rho hat at position (t, x)
         '''
-        u_tanh = self.neural_network(tf.concat([t,x],1), self.weights['density'], 
-                                self.biases['density'], act=tf.nn.tanh, encoders=True)
-        return u_tanh
+        rho_pred = self.density_network(torch.cat([t,x],1)) # TODO: were the encoders needed?
+        return rho_pred
 
     def net_f(self, t, x):
         '''
         return the physics function f at position (t,x)
         N_rho[rho, v] := rho_t + F(rho) * rho_x - gamma^2 * rho_xx
-
         '''
-        u = self.net_u(t, x)
-        u_t = tf.gradients(u, t)[0]
-        u_x = tf.gradients(u, x)[0]
-        u_xx = tf.gradients(u_x, x)[0]
-        f = u_t + self.net_F(u) * u_x - self.gamma_var**2 * u_xx
+        rho = self.net_u(t, x)
+        rho_dt = torch.autograd.grad(rho, t, create_graph=True)[0]
+        rho_dx = torch.autograd.grad(rho, x, create_graph=True)[0]
+        rho_dxx = torch.autograd.grad(rho_dx, x, create_graph=True)[0]
+        f = rho_dt + self.net_F(rho) * rho_dx - self.gamma_var**2 * rho_dxx
         return f
     
     def net_x_pv(self, t, i=0):
-        '''
-        return the standardized position of the agent i
-        Parameters
-        ----------
-        t : tensor (NOT A LIST)
-            standardized time.
-        i : int, optional
-            Number of the agent. The default is 0.
-
-            standardized position of the agent i.
-        '''
-        x_tanh = self.neural_network(t, self.weights['trajectories'][i], 
-                                    self.biases['trajectories'][i], act=tf.nn.tanh)
+        x_tanh = self.trajectories_network[i](t)
         return x_tanh
     
     def net_x(self, t):
         '''
-        return the standardized position of each agent
-        Parameters
-        ----------
-        t : list of tensors
-            standardized time.
-        Returns
-        -------
-        output : list of tensors
-            list of standardized positions of all agents at given time.
+        Return the standardized position of each agent.
         '''
         output = [self.net_x_pv(t[i], i) for i in range(self.N)]
         return output
@@ -436,24 +238,16 @@ class NeuralNetwork(nn.Module):
         '''
         return the physics function g for all agents at time t
         N_y[y_i] := x_t - v(rho(t, x(t)))
-
         '''
         
         x_trajectories = self.net_x(t) 
         g = []
         for i in range(len(x_trajectories)):
-            x_t = tf.gradients(x_trajectories[i], t[i])[0]
-            u = self.net_u(t[i], x_trajectories[i])
-            g.append(x_t - self.net_v(u))
+            x_dt = torch.autograd.grad(x_trajectories[i], t[i], create_graph=True)[0]
+            rho = self.net_u(t[i], x_trajectories[i])
+            g.append(x_dt - self.net_v(rho))
         return g
 
-    def loss_callback(self, MSEu1, MSEu2, MSEf, MSEtrajectories, MSEg, MSEv1, MSEv2, MSEv, total_loss, gamma):
-        
-        if self.epoch%10 == 1:
-            print('Epoch: %.0f | MSEu1: %.5e | MSEu2: %.5e | MSEf: %.5e | MSEtrajectories: %.5e | MSEg: %.5e | MSEv1: %.5e | MSEv2: %.5e | MSEv: %.5e | Gamma: %.5e | Total: %.5e' %
-                  (self.epoch, MSEu1, MSEu2, MSEf, MSEtrajectories, MSEg, MSEv1, MSEv2, MSEv, gamma**2, total_loss))
-            
-        self.epoch += 1
 
     def train(self):
         '''
@@ -462,7 +256,6 @@ class NeuralNetwork(nn.Module):
         Returns
         -------
         None.
-
         '''
         
         tf_dict = { }
@@ -496,27 +289,6 @@ class NeuralNetwork(nn.Module):
             self.epoch = 1
             self.saved_lambdas = self.optimizer[i].train(tf_dict, i+1)    
     
-    def predict(self, t, x):
-        '''
-        Return the standardized estimated density at (t, x)
-
-        Parameters
-        ----------
-        t : numpy array (?, )
-            standardized time coordinate.
-        x : numpy array (?, )
-            standardized space coordinate.
-
-        Returns
-        -------
-        numpy array
-            standardized estimated density.
-
-        '''
-        t = np.float32(t)
-        x = np.float32(x)
-
-        return np.minimum(np.maximum(self.sess.run(self.net_u(t, x)), -1), 1)
     
     def predict_speed(self, u):
         '''
@@ -655,7 +427,7 @@ class OptimizationProcedure():
                                     feed_dict=tf_dict,
                                     fetches=[mother.losses, self.loss])
             
-        if self.opt == 1: # Real penaly method
+        if self.opt == 1: # Real penalty method
             for i in range(self.N_epochs):
                 self.optimizer_BFGS.minimize(mother.sess,
                                         feed_dict=tf_dict,
