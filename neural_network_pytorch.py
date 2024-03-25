@@ -11,8 +11,10 @@ import torch
 import torch.nn.functional as F
 import torch.nn as nn
 import torch.optim as optim
+from tqdm import tqdm
 from torch.autograd import Variable
 import numpy as np
+import torch
 
 class NeuralNetwork(nn.Module):
 
@@ -101,7 +103,7 @@ class NeuralNetwork(nn.Module):
         self.velocity_network = self.build_network(layers_speed, act=nn.Tanh())
 
 
-    def calculate_losses(self, t, x, u, v, X_f, t_g, u_v, only_data=False):
+    def calculate_losses(self, t, x, u, v, X_f, t_g, u_v):
         """
         Calculate and return the model losses based on inputs and physics.
         Parameters:
@@ -111,6 +113,7 @@ class NeuralNetwork(nn.Module):
             A dictionary of various loss components.
         """
         # Predictions
+        breakpoint()
         u_pred = torch.stack([self.net_u(t[i], x[i]) for i in range(len(t))]) - torch.stack(self.noise_rho_bar)
         v_pred = self.net_v(u)
         x_pred = torch.stack([self.net_x_pv(t_g[i], i) for i in range(len(t_g))])
@@ -125,65 +128,103 @@ class NeuralNetwork(nn.Module):
         MSEv2 = F.mse_loss(v, self.net_v(torch.stack(self.u_pred)))  # Placeholder, adjust as needed
 
 
-        if only_data:
-            return {
-                "MSEu1": MSEu1, "MSEu2": MSEu2,
-                "MSEtrajectories": MSEtrajectories,
-                "MSEv1": MSEv1, "MSEv2": MSEv2
-            }
-        else:
-            # Physics Losses
-            f_pred = self.net_f(X_f[:, 1], X_f[:, 0])  # Assuming X_f is [x, t]
-            g_pred = self.net_g(t_g)
+        f_pred = self.net_f(X_f[:, 1], X_f[:, 0])  # Assuming X_f is [x, t]
+        g_pred = self.net_g(t_g)
 
-            MSEf = torch.mean(f_pred**2)  # Residual of PDE Predictions flux function
-            MSEg = torch.mean(g_pred**2)  # Residual of PDE Predictions g function
-            MSEv = torch.mean(torch.relu(self.net_ddf(u_v))**2)  # Placeholder, adjust as needed
-            return {
-                "MSEu1": MSEu1, "MSEu2": MSEu2, "MSEf": MSEf, 
-                "MSEtrajectories": MSEtrajectories, "MSEg": MSEg,
-                "MSEv1": MSEv1, "MSEv2": MSEv2, "MSEv": MSEv
-            }
+        MSEf = torch.mean(f_pred**2)  # Residual of PDE Predictions flux function
+        MSEg = torch.mean(g_pred**2)  # Residual of PDE Predictions g function
+        MSEv = torch.mean(torch.relu(self.net_ddf(u_v))**2)  # Placeholder, adjust as needed
+        return {
+            "MSEu1": MSEu1, "MSEu2": MSEu2, "MSEf": MSEf, 
+            "MSEtrajectories": MSEtrajectories, "MSEg": MSEg,
+            "MSEv1": MSEv1, "MSEv2": MSEv2, "MSEv": MSEv
+        }
         
-    def preprocess_datapoints(self, x):
+
+    def calculate_data_losses(self, t, x, u, v):
+        # Predictions
+        u_pred = [self.net_u(t[i], x[i]) - self.noise_rho_bar[i] for i in range(len(t))] # list of tensors, since each tensor has a different shape
+        v_pred = [self.net_v(u[i]) for i in range(len(t))]
+        x_pred = [self.net_x_pv(t[i], i) for i in range(len(t))]  # data points or physics points?
+        # x_pred = torch.stack([self.net_x_pv(t_g[i], i) for i in range(len(t_g))]) # data points or physics points?
+
+        # Data Losses
+        MSEu1_list = [F.mse_loss(u[i], u_pred[i]) for i in range(len(u))]
+        MSEu1 = torch.mean(torch.stack(MSEu1_list))  # MSE for Adjusted Density Predictions (rho_pred - rho_true - noise)^2
+
+        MSEtrajectories_list = [F.mse_loss(x[i], x_pred[i]) for i in range(len(x))]
+        MSEtrajectories = torch.mean(torch.stack(MSEtrajectories_list))  # MSE for Trajectories Predictions (x_pred - x_true)^2
+
+        MSEv1_list = [F.mse_loss(v[i], v_pred[i]) for i in range(len(v))]
+        MSEv1 = torch.mean(torch.stack(MSEv1_list))  # MSE for Adjusted Density Predictions (rho_pred - rho_true - noise)^2
+
+        # MSEv1 = F.mse_loss(v, v_pred)  # MSE for Speed Predictions (v_pred - v_true)^2
+        # MSEv2 = F.mse_loss(v, self.net_v(torch.stack(self.u_pred)))  # Placeholder, adjust as needed
+
+        return {
+            "MSEu1": MSEu1,
+            "MSEtrajectories": MSEtrajectories,
+            "MSEv1": MSEv1
+        }
+
+        return {
+            "MSEu1": MSEu1, "MSEu2": MSEu2,
+            "MSEtrajectories": MSEtrajectories,
+            "MSEv1": MSEv1, "MSEv2": MSEv2
+        }
+
+        
+    def preprocess_datapoints_flatten(self, x):
         flattened_arrays = [arr.flatten() for arr in x] # Step 1: Flatten each ndarray
         concatenated_array = np.concatenate(flattened_arrays) # Concatenate the flattened arrays
         torch_tensor = torch.tensor(concatenated_array, dtype=torch.float32) # Step 3: Convert to a PyTorch tensor
         return torch_tensor
+    
+    def preprocess_datapoints(self, x):
+        return [torch.from_numpy(arr).float() for arr in x]
 
     # create a function to train the model with torch
     def train(self):
         '''
         Train the neural network
         '''
+
+        
         # Convert the data to torch tensors
         t = self.preprocess_datapoints(self.t) # 3267 data points in total (all PV data combined)
         x = self.preprocess_datapoints(self.x)
         u = self.preprocess_datapoints(self.u)
         v = self.preprocess_datapoints(self.v)
 
-        breakpoint()
+        # t = self.t
+        # x = self.x
+        # u = self.u
+        # v = self.v
 
-        X_f = torch.tensor(self.X_f, dtype=torch.float32)
+        X_f = torch.tensor(self.x_f, dtype=torch.float32)
         t_g = torch.tensor(self.t_g, dtype=torch.float32)
         u_v = torch.tensor(self.u_v, dtype=torch.float32)
         
         # Define the optimizer
         optimizer = optim.Adam(self.parameters(), lr=0.01)
-
-        breakpoint()
        
         # Train the model
-        for epoch in range(self.N_epochs):
-            print(f"epoch {epoch}")
+        self.N_epochs = 1000
+        for epoch in tqdm(range(self.N_epochs)):
+            
             optimizer.zero_grad()
-            losses = self.calculate_losses(t, x, u, v, X_f, t_g, u_v, only_data=True)
+            losses = self.calculate_data_losses(t, x, u, v)
+            print(losses)
+            loss = sum(losses.values())
+            # loss = sum([self.sigmas[i]*losses[key] for i, key in enumerate(losses.keys())])
             loss = sum([self.sigmas[i]*losses[key] for i, key in enumerate(losses.keys())])
+
             loss.backward()
             optimizer.step()
             if epoch % self.N_lambda == 0:
-                self.gamma_var = self.gamma_var - 0.1 * self.gamma_var.grad
-                self.noise_rho_bar = [self.noise_rho_bar[i] - 0.1 * self.noise_rho_bar[i].grad for i in range(self.N)]
+                pass
+                # self.gamma_var = self.gamma_var - 0.1 * self.gamma_var.grad
+                # self.noise_rho_bar = [self.noise_rho_bar[i] - 0.1 * self.noise_rho_bar[i].grad for i in range(self.N)]
         return losses
      
     # build pytorch network    
@@ -286,12 +327,18 @@ class NeuralNetwork(nn.Module):
         '''
         Return the standardized estimated agents' locations at t
         Parameters
-      
-        '''
+        '''        
+        predictions = []  # Define the variable "predictions"
+        t = torch.tensor(t, dtype=torch.float32)
+
+        predictions = self.net_x(t)
+
+        # breakpoint()
+        return predictions
         tf_dict = {}
         i = 0
-        for k, v in zip(self.t_tf, t):
+        for t in zip(self.t):
             tf_dict[k] = torch.tensor(v, dtype=torch.float32)
             i = i+1
-        return self.net_x(torch.stack([tf_dict[k] for k in self.t_tf])).detach().numpy()
+        return self.net_x(torch.stack([tf_dict[k] for k in self.t_f])).detach().numpy()
     

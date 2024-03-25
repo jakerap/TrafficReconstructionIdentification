@@ -10,6 +10,7 @@ import matplotlib.pyplot as plt
 from time import time
 from pyDOE import lhs
 from neural_network_pytorch import NeuralNetwork
+import torch
 
 def hms(seconds):
     m, s = divmod(seconds, 60)
@@ -92,7 +93,7 @@ class ReconstructionNeuralNetwork():
                                             layers_trajectories=layers_trajectories, 
                                             layers_speed=(1, 5, 5, 1),
                                             max_speed=v_max, beta=0.05,
-                                            N_epochs=3000, N_lambda=10, 
+                                            N_epochs=300, N_lambda=10, 
                                             sigmas=sigmas, opt=opt) # Creation of the neural network
             
     def createTrainingDataset(self, t, x, rho, v, v_max, L, Tmax, N_f, N_g, N_v):       
@@ -196,7 +197,7 @@ class ReconstructionNeuralNetwork():
         x = 2*(x - self.lb[0])/(self.ub[0] - self.lb[0])-1
         t = 2*(t - self.lb[1])/(self.ub[1] - self.lb[1])-1
         
-        return self.neural_network.predict(t, x)/2+0.5
+        return self.neural_network(t, x)/2+0.5
     
     def predict_speed(self, rho):
         '''
@@ -273,7 +274,6 @@ class ReconstructionNeuralNetwork():
         -------
         list of three Figures
             return the speed, reconstruction and error figures.
-
         '''
         
         x = axisPlot[0]
@@ -288,42 +288,48 @@ class ReconstructionNeuralNetwork():
             for j in range(0, Nt):
                 XY_prediction[k] = np.array([t[j], x[i]])
                 k = k + 1
-        tstar = XY_prediction[:, 0:1]
-        xstar = XY_prediction[:, 1:2]
+        tstar = torch.from_numpy(XY_prediction[:, 0:1]).float()
+        xstar = torch.from_numpy(XY_prediction[:, 1:2]).float()
+
+        # breakpoint()
         
-        rho_prediction = self.predict(tstar, xstar).reshape(Nx, Nt)
+        rho_prediction = self.neural_network.net_u(tstar, xstar).reshape(Nx, Nt)
+        rho_prediction = rho_prediction.detach().numpy()
         t_pred = [(np.linspace(np.amin(self.t[i]), np.amax(self.t[i]), t.shape[0])).reshape(-1, 1) for i in range(self.Nxi)]
         X_prediction = self.predict_trajectories(t_pred)
         rho_speed = np.linspace(0, 1).reshape(-1,1)
-        v_prediction = self.predict_speed(rho_speed).reshape(-1,1)
-        F_prediction = self.predict_F(rho_speed).reshape(-1,1)
+        # v_prediction = self.predict_speed(rho_speed).reshape(-1,1)
+        # F_prediction = self.predict_F(rho_speed).reshape(-1,1)
+
+        # breakpoint()
+
         
-        figSpeed = plt.figure(figsize=(7.5, 5))
-        plt.plot(rho_speed, v_prediction, rasterized=True, label=r'NN approximation of $V$')
-        plt.plot(rho_speed, F_prediction, rasterized=True, label=r'NN approximation of $F$')
-        densityMeasurements = np.empty((0,1))
-        speedMeasurements = np.empty((0,1))
-        for i in range(self.Nxi):
-            densityMeasurements = np.vstack((densityMeasurements, self.rho[i]))
-            speedMeasurements = np.vstack((speedMeasurements, self.v[i]))
-        plt.scatter(densityMeasurements, speedMeasurements, rasterized=True, 
-                    c='k', s=1, label=r'Data')
-        plt.xlabel(r'Normalized Density')
-        plt.ylabel(r'Speed [km/min]')
-        # plt.ylim(-v_prediction[0], v_prediction[0])
-        plt.xlim(0, 1)
-        plt.grid()
-        plt.legend()
-        plt.tight_layout()
-        # plt.title('Reconstruction')
-        # figSpeed.savefig('speed.eps', bbox_inches='tight')
-        figSpeed.savefig('speed_flow.png', bbox_inches='tight')
+        # figSpeed = plt.figure(figsize=(7.5, 5))
+        # plt.plot(rho_speed, v_prediction, rasterized=True, label=r'NN approximation of $V$')
+        # plt.plot(rho_speed, F_prediction, rasterized=True, label=r'NN approximation of $F$')
+        # densityMeasurements = np.empty((0,1))
+        # speedMeasurements = np.empty((0,1))
+        # for i in range(self.Nxi):
+        #     densityMeasurements = np.vstack((densityMeasurements, self.rho[i]))
+        #     speedMeasurements = np.vstack((speedMeasurements, self.v[i]))
+        # plt.scatter(densityMeasurements, speedMeasurements, rasterized=True, 
+        #             c='k', s=1, label=r'Data')
+        # plt.xlabel(r'Normalized Density')
+        # plt.ylabel(r'Speed [km/min]')
+        # # plt.ylim(-v_prediction[0], v_prediction[0])
+        # plt.xlim(0, 1)
+        # plt.grid()
+        # plt.legend()
+        # plt.tight_layout()
+        # # plt.title('Reconstruction')
+        # # figSpeed.savefig('speed.eps', bbox_inches='tight')
+        # figSpeed.savefig('speed_flow.png', bbox_inches='tight')
 
         figReconstruction = plt.figure(figsize=(7.5, 5))
         X, Y = np.meshgrid(t, x)
         plt.pcolor(X, Y, rho_prediction, vmin=0.0, vmax=1.0, shading='auto', cmap='rainbow', rasterized=True)
         for i in range(self.Nxi):
-            plt.plot(t_pred[i], X_prediction[i], color="saddlebrown", label='Predicted Trajectory')
+            plt.plot(t_pred[i], X_prediction[i].detach().numpy(), color="black", label='Predicted Trajectory')
         plt.xlabel(r'Time [min]')
         plt.ylabel(r'Position [km]')
         plt.xlim(min(t), max(t))
@@ -334,6 +340,7 @@ class ReconstructionNeuralNetwork():
         plt.legend()
         # figReconstruction.savefig('reconstruction.eps', bbox_inches='tight')
         figReconstruction.savefig('reconstruction.png', bbox_inches='tight')
+        breakpoint()
         
         figLambda = plt.figure(figsize=(7.5, 5))
         color_plot = plt.rcParams['axes.prop_cycle'].by_key()['color']
@@ -370,4 +377,4 @@ class ReconstructionNeuralNetwork():
         # figError.savefig('error.eps', bbox_inches='tight') 
         figError.savefig('error.png', bbox_inches='tight') 
         
-        return [figSpeed, figReconstruction, figError]
+        # return [figSpeed, figReconstruction, figError]
