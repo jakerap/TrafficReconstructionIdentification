@@ -9,7 +9,7 @@ import numpy as np
 import matplotlib.pyplot as plt
 from time import time
 from pyDOE import lhs
-from neural_network import NeuralNetwork
+from neural_network_pytorch import NeuralNetwork
 
 def hms(seconds):
     m, s = divmod(seconds, 60)
@@ -20,7 +20,6 @@ def hms(seconds):
 def amin(l):
     min_list = [np.amin(l[i]) for i in range(len(l))]
     return np.amin(min_list)  
-
 
 def amax(l):
     min_list = [np.amax(l[i]) for i in range(len(l))]
@@ -162,11 +161,6 @@ class ReconstructionNeuralNetwork():
         
         return (t, x, rho, v, X_f, t_g, u_v, v_max)
     
-    def start(self):
-        self.neural_network.start()
-
-    def close(self):
-        self.neural_network.close()
 
     def train(self):
         '''

@@ -7,7 +7,8 @@ Created on Mon Sep 14 15:17:25 2020
 
 import numpy as np
 np.random.seed(12345)
-import reconstruction_neural_network as rn
+# import reconstruction_neural_network as rn
+import reconstruction_neural_network_pytorch as rn
 import sumo as s
 import matplotlib.pyplot as plt
 
@@ -29,13 +30,8 @@ Vf = np.amax(v_train[14]) # find the highest speed in the training data
 
 trained_neural_network = rn.ReconstructionNeuralNetwork(t_train, x_train, rho_train, v_train,
                                                     L, Tmax, N_f=500, N_g=50, opt=9)
-trained_neural_network.start()
-trained_neural_network.train()
 
-# [_, _, figError] = trained_neural_network.plot(axisPlot, rho)
-# sumo.plotProbeVehicles()
-# figError.savefig('error.eps', bbox_inches='tight')
-# trained_neural_network.close()
+trained_neural_network.train()
 
 
 [_, _, figError] = trained_neural_network.plot(axisPlot, rho)

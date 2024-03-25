@@ -119,12 +119,12 @@ for pv in PVList.pvs:
         rhoPV.append(density[i,j-NtStart])
 plt.scatter(tVarPlot, xVar, color='k', s=0.4)
 
-# with open(scenario+'/spaciotemporal.csv', 'w', newline='') as file:
-#     writer = csv.writer(file)
-#     writer.writerows([[L, (Tmax-Tstart)]])
-#     writer.writerows(density)
+with open(scenario+'/spaciotemporal.csv', 'w', newline='') as file:
+    writer = csv.writer(file)
+    writer.writerows([[L, (Tmax-Tstart)]])
+    writer.writerows(density)
     
-# with open(scenario+'/pv.csv', 'w', newline='') as file:
-#     writer = csv.writer(file)
-#     writer.writerows(np.array([xVar, tVar, rhoPV, vPV]).T)
+with open(scenario+'/pv.csv', 'w', newline='') as file:
+    writer = csv.writer(file)
+    writer.writerows(np.array([xVar, tVar, rhoPV, vPV]).T)
     
