@@ -15,6 +15,11 @@ from tqdm import tqdm
 from torch.autograd import Variable
 import numpy as np
 import torch
+import torch.nn.init as init
+
+import matplotlib.pyplot as plt
+
+
 
 class NeuralNetwork(nn.Module):
 
@@ -75,18 +80,22 @@ class NeuralNetwork(nn.Module):
         self.opt = opt # Optimization method
         self.sigmas = sigmas # Weights for the loss functions / soft-hard constraints
 
+        # data points
         self.t = t # time data points 16*[162, 1] there are 16 PVs
         self.x = x # space data points 16*[162, 1], actually each consecutive PV has more data points
         self.u = u # density data points 16*[162, 1]
         self.v = v # speed data points 16*[162, 1]
 
-        self.x_f = X_f[:, 0:1] # space data points for the PDE [500, 1]
-        self.t_f = X_f[:, 1:2] # time data points for the PDE [500, 1]
-        self.t_g = t_g # time data points for the PDE 16*[50, 1]
-        self.u_v = u_v # density data points for the PDE [50, 1]
+
+        # physics points
+        self.x_f = torch.tensor(X_f[:, 0:1], dtype=torch.float32) # space data points for the PDE [500, 1]
+        self.t_f = torch.tensor(X_f[:, 1:2], dtype=torch.float32) # time data points for the PDE [500, 1]
+        self.t_g = torch.tensor(t_g, dtype=torch.float32) # time data points for the PDE 16*[50, 1]
+        self.u_v = torch.tensor(u_v, dtype=torch.float32) # density data points for the PDE [50, 1]
         
         self.N = len(self.x)  # Number of agents
         self.max_speed = max_speed
+        
 
         self.gamma_var = torch.tensor(1e-2, dtype=torch.float32, requires_grad=True) # Viscosity parameter
         self.noise_rho_bar = [torch.tensor(torch.randn(1, 1) * 0.001, dtype=torch.float32, requires_grad=True) 
@@ -113,7 +122,6 @@ class NeuralNetwork(nn.Module):
             A dictionary of various loss components.
         """
         # Predictions
-        breakpoint()
         u_pred = torch.stack([self.net_u(t[i], x[i]) for i in range(len(t))]) - torch.stack(self.noise_rho_bar)
         v_pred = self.net_v(u)
         x_pred = torch.stack([self.net_x_pv(t_g[i], i) for i in range(len(t_g))])
@@ -143,34 +151,48 @@ class NeuralNetwork(nn.Module):
 
     def calculate_data_losses(self, t, x, u, v):
         # Predictions
-        u_pred = [self.net_u(t[i], x[i]) - self.noise_rho_bar[i] for i in range(len(t))] # list of tensors, since each tensor has a different shape
+        u_pred = [self.net_u(t[i], x[i]) - self.noise_rho_bar[i]*0 for i in range(len(t))] # list of tensors, since each tensor has a different shape
         v_pred = [self.net_v(u[i]) for i in range(len(t))]
-        x_pred = [self.net_x_pv(t[i], i) for i in range(len(t))]  # data points or physics points?
+        # x_pred = [self.net_x_pv(t[i], i) for i in range(len(t))]  # data points or physics points?
+        # x_pred0 = self.net_x_pv(t[0], 0)
         # x_pred = torch.stack([self.net_x_pv(t_g[i], i) for i in range(len(t_g))]) # data points or physics points?
 
         # Data Losses
-        MSEu1_list = [F.mse_loss(u[i], u_pred[i]) for i in range(len(u))]
+        MSEu1_list = [F.mse_loss(u[i], u_pred[i]) for i in range(len(u))] # L_2
         MSEu1 = torch.mean(torch.stack(MSEu1_list))  # MSE for Adjusted Density Predictions (rho_pred - rho_true - noise)^2
 
-        MSEtrajectories_list = [F.mse_loss(x[i], x_pred[i]) for i in range(len(x))]
-        MSEtrajectories = torch.mean(torch.stack(MSEtrajectories_list))  # MSE for Trajectories Predictions (x_pred - x_true)^2
+        # # MSEu2_l
+        # MSEtrajectories_list = [F.mse_loss(x[i], x_pred[i]) for i in range(len(x))]
+        # MSEtrajectories = torch.mean(torch.stack(MSEtrajectories_list))  # MSE for Trajectories Predictions (x_pred - x_true)^2
+        # MSEtrajectories0 = F.mse_loss(x[0].squeeze(0), x_pred0.squeeze(0))  # MSE for Trajectories Predictions (x_pred - x_true)^2
 
-        MSEv1_list = [F.mse_loss(v[i], v_pred[i]) for i in range(len(v))]
+
+        MSEv1_list = [F.mse_loss(v[i], v_pred[i]) for i in range(len(v))] # L_3
         MSEv1 = torch.mean(torch.stack(MSEv1_list))  # MSE for Adjusted Density Predictions (rho_pred - rho_true - noise)^2
 
-        # MSEv1 = F.mse_loss(v, v_pred)  # MSE for Speed Predictions (v_pred - v_true)^2
-        # MSEv2 = F.mse_loss(v, self.net_v(torch.stack(self.u_pred)))  # Placeholder, adjust as needed
+        MSEv2_list = [F.mse_loss(v[i], self.net_v(u_pred[i])) for i in range(len(v))] # L_5
+        MSEv2 = torch.mean(torch.stack(MSEv2_list))  # MSE for Adjusted Density Predictions (rho_pred - rho_true - noise)^2
 
         return {
             "MSEu1": MSEu1,
-            "MSEtrajectories": MSEtrajectories,
-            "MSEv1": MSEv1
+            # "MSEtrajectories": MSEtrajectories,
+            # "MSEtrajectories": MSEtrajectories0,
+            "MSEv1": MSEv1,
+            "MSEv2": MSEv2
         }
 
+
+    def calculate_physics_losses(self):
+        f_pred = self.net_f(self.t_f, self.x_f)
+        # g_pred = self.net_g(self.t_g)
+        MSEf = torch.mean(f_pred**2)  # Residual of PDE Predictions flux function
+        # MSEg = torch.mean(g_pred**2)  # Residual of PDE Predictions g function
+        MSEv = torch.mean(torch.relu(self.net_ddf(self.u_v))**2)  # Placeholder, adjust as needed
+
         return {
-            "MSEu1": MSEu1, "MSEu2": MSEu2,
-            "MSEtrajectories": MSEtrajectories,
-            "MSEv1": MSEv1, "MSEv2": MSEv2
+            "MSEf": MSEf,
+            # "MSEg": MSEg,
+            "MSEv": MSEv
         }
 
         
@@ -188,50 +210,53 @@ class NeuralNetwork(nn.Module):
         '''
         Train the neural network
         '''
-
-        
         # Convert the data to torch tensors
         t = self.preprocess_datapoints(self.t) # 3267 data points in total (all PV data combined)
         x = self.preprocess_datapoints(self.x)
         u = self.preprocess_datapoints(self.u)
         v = self.preprocess_datapoints(self.v)
 
-        # t = self.t
-        # x = self.x
-        # u = self.u
-        # v = self.v
+        breakpoint()
+
 
         X_f = torch.tensor(self.x_f, dtype=torch.float32)
         t_g = torch.tensor(self.t_g, dtype=torch.float32)
         u_v = torch.tensor(self.u_v, dtype=torch.float32)
         
         # Define the optimizer
-        optimizer = optim.Adam(self.parameters(), lr=0.01)
+        optimizer = optim.Adam(self.parameters(), lr=0.001)
        
         # Train the model
         self.N_epochs = 1000
-        for epoch in tqdm(range(self.N_epochs)):
-            
-            optimizer.zero_grad()
-            losses = self.calculate_data_losses(t, x, u, v)
-            print(losses)
-            loss = sum(losses.values())
-            # loss = sum([self.sigmas[i]*losses[key] for i, key in enumerate(losses.keys())])
-            loss = sum([self.sigmas[i]*losses[key] for i, key in enumerate(losses.keys())])
+        with tqdm(total=self.N_epochs, desc="Training Progress") as pbar:
+            for epoch in tqdm(range(self.N_epochs)):
+                
+                optimizer.zero_grad()
+                losses_data = self.calculate_data_losses(t, x, u, v)
+                losses_physics = self.calculate_physics_losses()
+                # print(losses['MSEtrajectories'])
+                loss = 0.01*sum(losses_data.values()) + sum(losses_physics.values())
+                # loss = losses["MSEtrajectories"]
+                # loss = sum([self.sigmas[i]*losses[key] for i, key in enumerate(losses.keys())])
+                # loss = sum([self.sigmas[i]*losses[key] for i, key in enumerate(losses.keys())])
+                pbar.set_postfix({'loss': loss.item()})
+                pbar.update(1)
 
-            loss.backward()
-            optimizer.step()
-            if epoch % self.N_lambda == 0:
-                pass
-                # self.gamma_var = self.gamma_var - 0.1 * self.gamma_var.grad
-                # self.noise_rho_bar = [self.noise_rho_bar[i] - 0.1 * self.noise_rho_bar[i].grad for i in range(self.N)]
-        return losses
+                loss.backward()
+                optimizer.step()
+                if epoch % self.N_lambda == 0:
+                    pass
+                    # self.gamma_var = self.gamma_var - 0.1 * self.gamma_var.grad
+                    # self.noise_rho_bar = [self.noise_rho_bar[i] - 0.1 * self.noise_rho_bar[i].grad for i in range(self.N)]
+            return loss
      
     # build pytorch network    
     def build_network(self, layers, act=nn.Tanh()):
         net = []
-        for i in range(0, len(layers)-1):
-            net.append(nn.Linear(layers[i], layers[i+1]))
+        for i in range(len(layers)-1):
+            linear_layer = nn.Linear(layers[i], layers[i+1])
+            init.xavier_normal_(linear_layer.weight)
+            net.append(linear_layer)
             net.append(act)
         return nn.Sequential(*net)
 
@@ -251,19 +276,22 @@ class NeuralNetwork(nn.Module):
         Standardized second derivative of the flux
         N_v[v] := f_rhorho = (rho*v(rho))_rhorho = 2*v_rho + rho*v(rho)_rhorho
         '''
+        rho.requires_grad_(True)
+
         f = rho*self.net_v(rho)
-        f_drho = torch.autograd.grad(f, rho, create_graph=True)[0]
-        f_drhorho = torch.autograd.grad(f_drho, rho, create_graph=True)[0]
+        f_drho = torch.autograd.grad(f, rho, torch.ones_like(f), create_graph=True)[0]
+        f_drhorho = torch.autograd.grad(f_drho, rho, torch.ones_like(f_drho), create_graph=True)[0]
         return f_drhorho
     
     def net_F(self, rho):
         '''
         Characteristic speed
         '''
+        rho.requires_grad_(True)
         v_pred = self.net_v(rho)
-        v_pred_du = torch.autograd.grad(v_pred, rho, create_graph=True)[0]
-        return v_pred + (rho+1)*v_pred_du
-        # return -self.max_speed * u
+        v_pred_du = torch.autograd.grad(v_pred, rho, grad_outputs=torch.ones_like(v_pred), create_graph=True)[0]
+        return v_pred + (rho + 1) * v_pred_du
+        # return -self.max_speed * rho
 
     def net_u(self, t, x):
         '''
@@ -277,10 +305,17 @@ class NeuralNetwork(nn.Module):
         return the physics function f at position (t,x)
         N_rho[rho, v] := rho_t + F(rho) * rho_x - gamma^2 * rho_xx
         '''
+        t.requires_grad_(True)
+        x.requires_grad_(True)
         rho = self.net_u(t, x)
-        rho_dt = torch.autograd.grad(rho, t, create_graph=True)[0]
-        rho_dx = torch.autograd.grad(rho, x, create_graph=True)[0]
-        rho_dxx = torch.autograd.grad(rho_dx, x, create_graph=True)[0]
+
+        # Assuming rho is not scalar and needs grad_outputs for proper gradient computation
+        grad_outputs = torch.ones_like(rho)
+
+        rho_dt = torch.autograd.grad(rho, t, grad_outputs=grad_outputs, create_graph=True)[0]
+        rho_dx = torch.autograd.grad(rho, x, grad_outputs=grad_outputs, create_graph=True)[0]
+        rho_dxx = torch.autograd.grad(rho_dx, x, grad_outputs=grad_outputs, create_graph=True)[0]
+
         f = rho_dt + self.net_F(rho) * rho_dx - self.gamma_var**2 * rho_dxx
         return f
     
@@ -300,11 +335,13 @@ class NeuralNetwork(nn.Module):
         return the physics function g for all agents at time t
         N_y[y_i] := x_t - v(rho(t, x(t)))
         '''
-        
-        x_trajectories = self.net_x(t) 
+        t.requires_grad_(True)
+        x_trajectories = self.net_x(t)
+
         g = []
         for i in range(len(x_trajectories)):
-            x_dt = torch.autograd.grad(x_trajectories[i], t[i], create_graph=True)[0]
+            grad_outputs = torch.ones_like(x_trajectories[i])
+            x_dt = torch.autograd.grad(x_trajectories[i], t[i], grad_outputs=grad_outputs, create_graph=True)[0]
             rho = self.net_u(t[i], x_trajectories[i])
             g.append(x_dt - self.net_v(rho))
         return g
@@ -313,14 +350,14 @@ class NeuralNetwork(nn.Module):
         '''
         Return the standardized estimated speed at u
         '''
-        u = torch.tensor(u, dtype=torch.float32)
+        u = torch.tensor(u, dtype=torch.float32).requires_grad_(True)
         return self.net_v(u).detach().numpy()
     
     def predict_F(self, u):
         '''
         Return the standardized estimated characteristic speed at u
         '''
-        u = torch.tensor(u, dtype=torch.float32)
+        u = torch.tensor(u, dtype=torch.float32).requires_grad_(True)
         return self.net_F(u).detach().numpy()
     
     def predict_trajectories(self, t):
@@ -333,7 +370,6 @@ class NeuralNetwork(nn.Module):
 
         predictions = self.net_x(t)
 
-        # breakpoint()
         return predictions
         tf_dict = {}
         i = 0

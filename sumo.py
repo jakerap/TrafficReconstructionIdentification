@@ -1,6 +1,8 @@
 import csv
 import numpy as np
 import matplotlib.pyplot as plt
+from matplotlib.animation import FuncAnimation
+
 
 class Sumo():
 
@@ -14,6 +16,7 @@ class Sumo():
         self.probe_t, self.probe_x, self.probe_u, self.probe_v = self.process_probe_data(data_train)  # probe_density(vehicle, position, time, density)
 
         self.Nx, self.Nt = self.u.shape
+
 
     def load_csv(self, file):
         data = []
@@ -74,8 +77,8 @@ class Sumo():
         plt.imshow(np.flipud(self.u), extent=[0, self.Tmax, 0, self.L], 
                    cmap='rainbow', vmin=0.0, vmax=1, aspect='auto')
         plt.colorbar()
-        for (t,x) in zip(self.probe_t, self.probe_x):
-            plt.plot(t, x, c='k')
+        # for (t,x) in zip(self.probe_t, self.probe_x):
+        #     plt.plot(t, x, c='k')
         # plt.title('Density')
         plt.xlabel(r'Time [min]')
         plt.ylabel(r'Position [km]')
@@ -87,3 +90,55 @@ class Sumo():
     def plotProbeVehicles(self):
         for (t,x) in zip(self.probe_t, self.probe_x):
             plt.plot(t, x, c='k')
+
+    def plotProbeDensity(self):
+        for (t,x,u) in zip(self.probe_t, self.probe_x, self.probe_u):
+            # plt.plot(t, x, c='k')
+            plt.scatter(t, x, c=u, cmap='rainbow', vmin=0.0, vmax=1, s=5)
+        plt.xlabel(r'Time [min]')
+        plt.ylabel(r'Position [km]')
+        plt.ylim(0, self.L)
+        plt.xlim(0, self.Tmax)
+        plt.tight_layout()
+        plt.colorbar()
+        plt.show()
+
+    def plotDensityMovie(self):
+        # Setting up the figure for the animation
+        fig, ax = plt.subplots(figsize=(7.5, 5))
+        # Placeholder for the heatmap
+        heatmap = ax.imshow(np.flipud(self.u[:, 0][:, np.newaxis]), extent=[0, 420, 0, 250], cmap='rainbow', vmin=0.0, vmax=1, aspect='auto')
+        plt.colorbar(heatmap, ax=ax)
+        ax.set_xlabel('Time [sec]')
+        ax.set_ylabel('Position [m]')
+        time_text = ax.text(0.02, 0.95, '', transform=ax.transAxes)  # Placeholder for time annotation
+
+        # Initialization function for the animation
+        def init():
+            heatmap.set_data(np.flipud(self.u[:, 0][:, np.newaxis]))
+            return heatmap,
+
+        # Update function for each frame
+        def update(frame):
+        # Ensuring we pass a 2D array for each frame
+            current_data = self.u[:, frame]
+            if current_data.ndim == 1:
+                current_data = current_data[:, np.newaxis]
+            heatmap.set_data(np.flipud(current_data))  # Update the heatmap for the current frame
+            time_text.set_text(f'Time: {frame:.2f} sec')  # Update time annotation
+            return heatmap, time_text
+
+        # Creating the animation
+        ani = FuncAnimation(fig, update, frames=int(420), init_func=init, blit=True)
+
+        # Save the animation
+        ani.save('heatmap_animation.gif', writer='pillow', fps=30)  
+
+    
+    def plotProbeFD(self):
+        fig = plt.figure('FD', figsize=(7.5, 5))
+        for (t,x,u,v) in zip(self.probe_t, self.probe_x, self.probe_u, self.probe_v):
+            plt.scatter(u, v, c='k', s=5)
+        plt.xlabel(r'Density [veh/km]')
+        plt.ylabel(r'Speed [km/min]')
+        plt.tight_layout()

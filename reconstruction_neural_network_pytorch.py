@@ -84,9 +84,10 @@ class ReconstructionNeuralNetwork():
         layers_trajectories.append(1)  # There is one output: position
         
         sigmas = [1, 0.2, 0.5, 1, 0.5, 0, 1, 0.5, 0]
-        
+
+        # max of v is 1.96
         t_train, x_train, u_train, v_train, X_f_train, t_g_train, u_v_train, v_max = self.createTrainingDataset(t, x, rho, v, v_max, L, Tmax, N_f, N_g, N_v) # Creation of standardized training dataset
-        
+        # max of v is 5.49 (due to scaling of time and space)
         self.neural_network = NeuralNetwork(t_train, x_train, u_train, v_train, 
                                             X_f_train, t_g_train, u_v_train,
                                             layers_density=layers_density, 
@@ -137,27 +138,28 @@ class ReconstructionNeuralNetwork():
         '''
         
         self.lb = np.array([amin(x), amin(t)])
-        self.ub = np.array([amax(x), amax(t)])
+        self.ub = np.array([amax(x), amax(t)]) # [2.5, 7.0]
         self.lb[0], self.lb[1] = 0, 0
         
-        x = [2*(x_temp - self.lb[0])/(self.ub[0] - self.lb[0]) - 1 for x_temp in x]
-        t = [2*(t_temp - self.lb[1])/(self.ub[1] - self.lb[1]) - 1 for t_temp in t]
-        rho = [2*rho_temp-1 for rho_temp in rho]
-        v = [v_temp*(self.ub[1] - self.lb[1]) / (self.ub[0] - self.lb[0]) for v_temp in v]
+        x = [2*(x_temp - self.lb[0])/(self.ub[0] - self.lb[0]) - 1 for x_temp in x] # bring x to [-1, 1]
+        t = [2*(t_temp - self.lb[1])/(self.ub[1] - self.lb[1]) - 1 for t_temp in t] # bring t to [-1, 1]
+
+        rho = [2*rho_temp-1 for rho_temp in rho] # bring rho to [-1, 1]
+        v = [v_temp*(self.ub[1] - self.lb[1]) / (self.ub[0] - self.lb[0]) for v_temp in v] # scale with new space and time
         if v_max is not None:
-            v_max = v_max*(self.ub[1] - self.lb[1]) / (self.ub[0] - self.lb[0])
+            v_max = v_max*(self.ub[1] - self.lb[1]) / (self.ub[0] - self.lb[0]) 
         
         X_f = np.array([2, 2])*lhs(2, samples=N_f)
-        X_f = X_f - np.ones(X_f.shape)
+        X_f = X_f - np.ones(X_f.shape)  # bring X_f to [-1, 1]
         np.random.shuffle(X_f)
         
         t_g = []
         for i in range(self.Nxi):
-            tgi = np.amin(t[i]) + lhs(1, samples=N_g)*(np.amax(t[i]) - np.amin(t[i]))
+            tgi = np.amin(t[i]) + lhs(1, samples=N_g)*(np.amax(t[i]) - np.amin(t[i])) # bring t_g to [0, Tmax]
             np.random.shuffle(tgi)
             t_g.append(tgi)
             
-        u_v = lhs(1, samples=N_v)*2-1
+        u_v = lhs(1, samples=N_v)*2-1 # bring u_v to [-1, 1]
         np.random.shuffle(u_v)
         
         return (t, x, rho, v, X_f, t_g, u_v, v_max)
@@ -291,39 +293,35 @@ class ReconstructionNeuralNetwork():
         tstar = torch.from_numpy(XY_prediction[:, 0:1]).float()
         xstar = torch.from_numpy(XY_prediction[:, 1:2]).float()
 
-        # breakpoint()
         
         rho_prediction = self.neural_network.net_u(tstar, xstar).reshape(Nx, Nt)
         rho_prediction = rho_prediction.detach().numpy()
         t_pred = [(np.linspace(np.amin(self.t[i]), np.amax(self.t[i]), t.shape[0])).reshape(-1, 1) for i in range(self.Nxi)]
         X_prediction = self.predict_trajectories(t_pred)
         rho_speed = np.linspace(0, 1).reshape(-1,1)
-        # v_prediction = self.predict_speed(rho_speed).reshape(-1,1)
-        # F_prediction = self.predict_F(rho_speed).reshape(-1,1)
+        v_prediction = self.predict_speed(rho_speed).reshape(-1,1)
+        F_prediction = self.predict_F(rho_speed).reshape(-1,1)
 
-        # breakpoint()
-
-        
-        # figSpeed = plt.figure(figsize=(7.5, 5))
-        # plt.plot(rho_speed, v_prediction, rasterized=True, label=r'NN approximation of $V$')
-        # plt.plot(rho_speed, F_prediction, rasterized=True, label=r'NN approximation of $F$')
-        # densityMeasurements = np.empty((0,1))
-        # speedMeasurements = np.empty((0,1))
-        # for i in range(self.Nxi):
-        #     densityMeasurements = np.vstack((densityMeasurements, self.rho[i]))
-        #     speedMeasurements = np.vstack((speedMeasurements, self.v[i]))
-        # plt.scatter(densityMeasurements, speedMeasurements, rasterized=True, 
-        #             c='k', s=1, label=r'Data')
-        # plt.xlabel(r'Normalized Density')
-        # plt.ylabel(r'Speed [km/min]')
-        # # plt.ylim(-v_prediction[0], v_prediction[0])
-        # plt.xlim(0, 1)
-        # plt.grid()
-        # plt.legend()
-        # plt.tight_layout()
-        # # plt.title('Reconstruction')
-        # # figSpeed.savefig('speed.eps', bbox_inches='tight')
-        # figSpeed.savefig('speed_flow.png', bbox_inches='tight')
+        figSpeed = plt.figure(figsize=(7.5, 5))
+        plt.plot(rho_speed, v_prediction, rasterized=True, label=r'NN approximation of $V$')
+        plt.plot(rho_speed, F_prediction, rasterized=True, label=r'NN approximation of $F$')
+        densityMeasurements = np.empty((0,1))
+        speedMeasurements = np.empty((0,1))
+        for i in range(self.Nxi):
+            densityMeasurements = np.vstack((densityMeasurements, self.rho[i]))
+            speedMeasurements = np.vstack((speedMeasurements, self.v[i]))
+        plt.scatter(densityMeasurements, speedMeasurements, rasterized=True, 
+                    c='k', s=1, label=r'Data')
+        plt.xlabel(r'Normalized Density')
+        plt.ylabel(r'Speed [km/min]')
+        # plt.ylim(-v_prediction[0], v_prediction[0])
+        plt.xlim(0, 1)
+        plt.grid()
+        plt.legend()
+        plt.tight_layout()
+        # plt.title('Reconstruction')
+        # figSpeed.savefig('speed.eps', bbox_inches='tight')
+        figSpeed.savefig('speed_flow.png', bbox_inches='tight')
 
         figReconstruction = plt.figure(figsize=(7.5, 5))
         X, Y = np.meshgrid(t, x)
@@ -337,35 +335,34 @@ class ReconstructionNeuralNetwork():
         plt.colorbar()
         plt.tight_layout()
         plt.title('Reconstruction')
-        plt.legend()
+        # plt.legend()
         # figReconstruction.savefig('reconstruction.eps', bbox_inches='tight')
         figReconstruction.savefig('reconstruction.png', bbox_inches='tight')
-        breakpoint()
         
-        figLambda = plt.figure(figsize=(7.5, 5))
-        color_plot = plt.rcParams['axes.prop_cycle'].by_key()['color']
-        style_plot = ["-", "--", "-."]
-        epochs = np.arange(len(self.neural_network.saved_lambdas[0])) * self.neural_network.N_lambda
-        for i in range(len(self.neural_network.saved_lambdas)):
-            plt.plot(epochs, self.neural_network.saved_lambdas[i], label='$\lambda_{i}$'.format(i=i+1), 
-                     linestyle=style_plot[i%3],
-                     color=color_plot[int(i/3)])
-        plt.xlabel(r'Epoch')
-        plt.ylabel(r'Lambda values')
-        plt.grid()
-        plt.xlim(0, max(epochs))
-        plt.legend(loc='best')
-        plt.tight_layout()
-        # plt.title('Absolute error')
-        # figLambda.savefig('lambda.eps', bbox_inches='tight')
-        figLambda.savefig('lambda.png', bbox_inches='tight')
+        # figLambda = plt.figure(figsize=(7.5, 5))
+        # color_plot = plt.rcParams['axes.prop_cycle'].by_key()['color']
+        # style_plot = ["-", "--", "-."]
+        # epochs = np.arange(len(self.neural_network.saved_lambdas[0])) * self.neural_network.N_lambda
+        # for i in range(len(self.neural_network.saved_lambdas)):
+        #     plt.plot(epochs, self.neural_network.saved_lambdas[i], label='$\lambda_{i}$'.format(i=i+1), 
+        #              linestyle=style_plot[i%3],
+        #              color=color_plot[int(i/3)])
+        # plt.xlabel(r'Epoch')
+        # plt.ylabel(r'Lambda values')
+        # plt.grid()
+        # plt.xlim(0, max(epochs))
+        # plt.legend(loc='best')
+        # plt.tight_layout()
+        # # plt.title('Absolute error')
+        # # figLambda.savefig('lambda.eps', bbox_inches='tight')
+        # figLambda.savefig('lambda.png', bbox_inches='tight')
         
         figError = plt.figure(figsize=(7.5, 5))
         X, Y = np.meshgrid(t, x)
         plt.pcolor(X, Y, np.abs(rho_prediction-rho), vmin=0.0, vmax=1.0, 
                    shading='auto', cmap='rainbow', rasterized=True)
         for i in range(self.Nxi):
-            plt.plot(t_pred[i], X_prediction[i], color="saddlebrown")
+            plt.plot(t_pred[i], X_prediction[i].detach().numpy(), color="saddlebrown")
         plt.xlabel(r'Time [min]')
         plt.ylabel(r'Position [km]')
         plt.xlim(min(t), max(t))

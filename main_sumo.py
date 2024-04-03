@@ -26,16 +26,14 @@ rho = sumo.getDensity()  # density(time, position) (250, 420)
 sumo.plotDensity()
 t_train, x_train, rho_train, v_train = sumo.getMeasurements()
 axisPlot = sumo.getAxisPlot()
-Vf = np.amax(v_train[14]) # find the highest speed in the training data
+Vf = np.amax(v_train[14]) # find the highest speed in the training data\
 
 trained_neural_network = rn.ReconstructionNeuralNetwork(t_train, x_train, rho_train, v_train,
-                                                    L, Tmax, N_f=500, N_g=50, opt=9)
+                                                    L, Tmax, N_f=500, N_g=50, opt=9, v_max=Vf)
 
 trained_neural_network.train()
 
 
-[_, _, figError] = trained_neural_network.plot(axisPlot, rho)
+trained_neural_network.plot(axisPlot, rho)
 sumo.plotProbeVehicles()
-figError.savefig('error.png', bbox_inches='tight')  # Changed file extension to .png
 plt.show()
-trained_neural_network.close()
