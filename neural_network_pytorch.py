@@ -20,6 +20,13 @@ import torch.nn.init as init
 import matplotlib.pyplot as plt
 
 
+def print_data_ranges(x, name=""):
+    if isinstance(x, list):
+        print(f"range of values {name}: [{min([min(xs) for xs in x])}, - {max([max(xs) for xs in x])}")
+    else:
+        print(f"range of values {name}: [{x.min()}, - {x.max()}]")
+      
+
 
 class NeuralNetwork(nn.Module):
 
@@ -80,22 +87,33 @@ class NeuralNetwork(nn.Module):
         self.opt = opt # Optimization method
         self.sigmas = sigmas # Weights for the loss functions / soft-hard constraints
 
-        # data points
-        self.t = t # time data points 16*[162, 1] there are 16 PVs
-        self.x = x # space data points 16*[162, 1], actually each consecutive PV has more data points
-        self.u = u # density data points 16*[162, 1]
-        self.v = v # speed data points 16*[162, 1]
+        self.device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
+        print(f"Device: {self.device}")
 
+        # data points
+        self.t = self.preprocess_datapoints(t) # time data points 16*[162, 1] there are 16 PVs
+        self.x = self.preprocess_datapoints(x) # space data points 16*[162, 1], actually each consecutive PV has more data points
+        self.u = self.preprocess_datapoints(u)
+        self.v = self.preprocess_datapoints(v)
 
         # physics points
-        self.x_f = torch.tensor(X_f[:, 0:1], dtype=torch.float32) # space data points for the PDE [500, 1]
-        self.t_f = torch.tensor(X_f[:, 1:2], dtype=torch.float32) # time data points for the PDE [500, 1]
-        self.t_g = torch.tensor(t_g, dtype=torch.float32) # time data points for the PDE 16*[50, 1]
-        self.u_v = torch.tensor(u_v, dtype=torch.float32) # density data points for the PDE [50, 1]
+        self.x_f = torch.tensor(X_f[:, 0:1], dtype=torch.float32, requires_grad=True) # space data points for the PDE [500, 1]
+        self.t_f = torch.tensor(X_f[:, 1:2], dtype=torch.float32, requires_grad=True) # time data points for the PDE [500, 1]
+        self.t_g = torch.tensor(t_g, dtype=torch.float32, requires_grad=True) # time data points for the PDE 16*[50, 1]
+        self.u_v = torch.tensor(u_v, dtype=torch.float32, requires_grad=True) # density data points for the PDE [50, 1]
         
         self.N = len(self.x)  # Number of agents
         self.max_speed = max_speed
-        
+
+        print_data_ranges(self.t, "t")
+        print_data_ranges(self.x, "x")
+        print_data_ranges(self.u, "u")
+        print_data_ranges(self.v, "v")
+        print_data_ranges(self.x_f, "x_f")
+        print_data_ranges(self.t_f, "t_f")
+        print_data_ranges(self.t_g, "t_g")
+        print_data_ranges(self.u_v, "u_v")
+
 
         self.gamma_var = torch.tensor(1e-2, dtype=torch.float32, requires_grad=True) # Viscosity parameter
         self.noise_rho_bar = [torch.tensor(torch.randn(1, 1) * 0.001, dtype=torch.float32, requires_grad=True) 
@@ -147,18 +165,81 @@ class NeuralNetwork(nn.Module):
             "MSEtrajectories": MSEtrajectories, "MSEg": MSEg,
             "MSEv1": MSEv1, "MSEv2": MSEv2, "MSEv": MSEv
         }
-        
 
-    def calculate_data_losses(self, t, x, u, v):
+    def plot_density_loss_on_trajectory(self):
+        plt.figure(figsize=(12, 6))  # Set figure size, adjust as needed
+        
+        # First subplot for predicted u values
+        plt.subplot(2, 2, 1)  # 1 row, 2 columns, subplot 1
+        for (t, x, u) in zip(self.t, self.x, self.u):  # No need to iterate over u for prediction plot
+            u_pred = self.net_u(t, x)
+            u_pred = u_pred.detach().numpy()
+            plt.scatter(t.detach().numpy(), x.detach().numpy(), c=u_pred-u.detach().numpy(), cmap='rainbow', vmin=0, vmax=1, s=5)
+        plt.xlabel(r'Time [min]')
+        plt.ylabel(r'Position [km]')
+        plt.colorbar(label='Predicted u')
+        # plt.title('Predicted Values at data points')
+        plt.title('Prediction error at data points')
+        
+        # Second subplot for actual u values
+        plt.subplot(2, 2, 2)  # 1 row, 2 columns, subplot 2
+        for (t, x, u) in zip(self.t, self.x, self.u):
+            plt.scatter(t.detach().numpy(), x.detach().numpy(), c=u.detach().numpy(), cmap='rainbow', vmin=-1, vmax=1, s=5)
+        plt.xlabel(r'Time [min]')
+        plt.ylabel(r'Position [km]')
+        plt.colorbar(label='Actual u')
+        plt.title('Actual Values')
+
+        plt.subplot(2, 2, 3)  # 1 row, 2 columns, subplot 2
+        u_pred = self.net_u(self.t_f, self.x_f)
+        plt.scatter(self.t_f.detach().numpy(), self.x_f.detach().numpy(), c=u_pred.detach().numpy(), cmap='rainbow', vmin=-1, vmax=1, s=15)
+        plt.xlabel(r'Time [min]')
+        plt.ylabel(r'Position [km]')
+        plt.colorbar(label='Predicted u')
+        plt.title('Predicted Values at physics points')
+
+        t_min, t_max = self.t_f.min().item(), self.t_f.max().item()  # Replace with actual min/max of time
+        x_min, x_max = self.x_f.min().item(), self.x_f.max().item()  # Replace with actual min/max of position
+        t_grid, x_grid = np.meshgrid(np.linspace(t_min, t_max, 100), np.linspace(x_min, x_max, 100))
+
+        # Flatten the grid for model evaluation and convert to tensor if necessary
+        t_flat = t_grid.flatten()
+        x_flat = x_grid.flatten()
+        # Assuming your model expects PyTorch tensors; adjust as necessary
+        t_flat_tensor = torch.tensor(t_flat, dtype=torch.float32).unsqueeze(1)
+        x_flat_tensor = torch.tensor(x_flat, dtype=torch.float32).unsqueeze(1)
+
+        # Evaluate the model on the grid points
+        # Note: You might need to adjust this part based on your model's input format
+        u_pred_flat = self.net_u(t_flat_tensor, x_flat_tensor).detach().numpy()
+
+        # Reshape the flat predictions back into the grid shape for plotting
+        u_pred_grid = u_pred_flat.reshape(t_grid.shape)
+
+        plt.subplot(2, 2, 4)  # 1 row, 2 columns, subplot 2
+        plt.pcolormesh(t_grid, x_grid, u_pred_grid, cmap='rainbow', shading='auto', vmin=-1, vmax=1)
+        plt.xlabel(r'Time [min]')
+        plt.ylabel(r'Position [km]')
+        plt.colorbar(label='Predicted u')
+        plt.title('Predicted Values at Physics Points')
+        
+        plt.tight_layout()  # Adjust layout
+        plt.show()
+
+
+
+    def calculate_data_losses(self):
+
+        # breakpoint()
         # Predictions
-        u_pred = [self.net_u(t[i], x[i]) - self.noise_rho_bar[i]*0 for i in range(len(t))] # list of tensors, since each tensor has a different shape
-        v_pred = [self.net_v(u[i]) for i in range(len(t))]
+        u_pred = [self.net_u(self.t[i], self.x[i]) - self.noise_rho_bar[i]*0 for i in range(len(self.t))] # list of tensors, since each tensor has a different shape
+        v_pred = [self.net_v(self.u[i]) for i in range(len(self.t))]
         # x_pred = [self.net_x_pv(t[i], i) for i in range(len(t))]  # data points or physics points?
         # x_pred0 = self.net_x_pv(t[0], 0)
         # x_pred = torch.stack([self.net_x_pv(t_g[i], i) for i in range(len(t_g))]) # data points or physics points?
 
         # Data Losses
-        MSEu1_list = [F.mse_loss(u[i], u_pred[i]) for i in range(len(u))] # L_2
+        MSEu1_list = [F.mse_loss(self.u[i], u_pred[i]) for i in range(len(self.u))] # L_2
         MSEu1 = torch.mean(torch.stack(MSEu1_list))  # MSE for Adjusted Density Predictions (rho_pred - rho_true - noise)^2
 
         # # MSEu2_l
@@ -167,18 +248,18 @@ class NeuralNetwork(nn.Module):
         # MSEtrajectories0 = F.mse_loss(x[0].squeeze(0), x_pred0.squeeze(0))  # MSE for Trajectories Predictions (x_pred - x_true)^2
 
 
-        MSEv1_list = [F.mse_loss(v[i], v_pred[i]) for i in range(len(v))] # L_3
+        MSEv1_list = [F.mse_loss(self.v[i], v_pred[i]) for i in range(len(self.v))] # L_3
         MSEv1 = torch.mean(torch.stack(MSEv1_list))  # MSE for Adjusted Density Predictions (rho_pred - rho_true - noise)^2
 
-        MSEv2_list = [F.mse_loss(v[i], self.net_v(u_pred[i])) for i in range(len(v))] # L_5
+        MSEv2_list = [F.mse_loss(self.v[i], self.net_v(u_pred[i])) for i in range(len(self.v))] # L_5
         MSEv2 = torch.mean(torch.stack(MSEv2_list))  # MSE for Adjusted Density Predictions (rho_pred - rho_true - noise)^2
 
         return {
             "MSEu1": MSEu1,
             # "MSEtrajectories": MSEtrajectories,
             # "MSEtrajectories": MSEtrajectories0,
-            "MSEv1": MSEv1,
-            "MSEv2": MSEv2
+            # "MSEv1": MSEv1,
+            # "MSEv2": MSEv2
         }
 
 
@@ -190,65 +271,70 @@ class NeuralNetwork(nn.Module):
         MSEv = torch.mean(torch.relu(self.net_ddf(self.u_v))**2)  # Placeholder, adjust as needed
 
         return {
-            "MSEf": MSEf,
+            # "MSEf": MSEf,
             # "MSEg": MSEg,
-            "MSEv": MSEv
+        #    "MSEv": MSEv
         }
 
         
     def preprocess_datapoints_flatten(self, x):
         flattened_arrays = [arr.flatten() for arr in x] # Step 1: Flatten each ndarray
         concatenated_array = np.concatenate(flattened_arrays) # Concatenate the flattened arrays
-        torch_tensor = torch.tensor(concatenated_array, dtype=torch.float32) # Step 3: Convert to a PyTorch tensor
+        torch_tensor = torch.tensor(concatenated_array, dtype=torch.float32, requires_grad=True) # Step 3: Convert to a PyTorch tensor with required gradient
         return torch_tensor
     
     def preprocess_datapoints(self, x):
-        return [torch.from_numpy(arr).float() for arr in x]
+        return [torch.from_numpy(arr).float().requires_grad_(True).to(self.device) for arr in x]
 
     # create a function to train the model with torch
     def train(self):
         '''
         Train the neural network
         '''
-        # Convert the data to torch tensors
-        t = self.preprocess_datapoints(self.t) # 3267 data points in total (all PV data combined)
-        x = self.preprocess_datapoints(self.x)
-        u = self.preprocess_datapoints(self.u)
-        v = self.preprocess_datapoints(self.v)
 
-        breakpoint()
+        # losses tracking
+        loss_history = {}
 
-
-        X_f = torch.tensor(self.x_f, dtype=torch.float32)
-        t_g = torch.tensor(self.t_g, dtype=torch.float32)
-        u_v = torch.tensor(self.u_v, dtype=torch.float32)
         
         # Define the optimizer
         optimizer = optim.Adam(self.parameters(), lr=0.001)
        
         # Train the model
-        self.N_epochs = 1000
+        self.N_epochs = 2000
+        # self.plot_density_loss_on_trajectory()
         with tqdm(total=self.N_epochs, desc="Training Progress") as pbar:
-            for epoch in tqdm(range(self.N_epochs)):
+            for epoch in range(self.N_epochs):
                 
                 optimizer.zero_grad()
-                losses_data = self.calculate_data_losses(t, x, u, v)
+                losses_data = self.calculate_data_losses()
                 losses_physics = self.calculate_physics_losses()
-                # print(losses['MSEtrajectories'])
-                loss = 0.01*sum(losses_data.values()) + sum(losses_physics.values())
-                # loss = losses["MSEtrajectories"]
+                loss = sum(losses_data.values()) + sum(losses_physics.values())
                 # loss = sum([self.sigmas[i]*losses[key] for i, key in enumerate(losses.keys())])
-                # loss = sum([self.sigmas[i]*losses[key] for i, key in enumerate(losses.keys())])
-                pbar.set_postfix({'loss': loss.item()})
-                pbar.update(1)
+  
 
                 loss.backward()
                 optimizer.step()
+
+                pbar.set_postfix({'loss': loss.item()})
+                pbar.update(1)
+
+
+                combined_losses = {**losses_data, **losses_physics}
+                for key, value in combined_losses.items():
+                    if key not in loss_history:
+                        loss_history[key] = []
+                    # Assuming the loss values are tensors, use .item() to get Python numbers
+                    loss_history[key].append(value.item())
+
+
+                
                 if epoch % self.N_lambda == 0:
                     pass
                     # self.gamma_var = self.gamma_var - 0.1 * self.gamma_var.grad
                     # self.noise_rho_bar = [self.noise_rho_bar[i] - 0.1 * self.noise_rho_bar[i].grad for i in range(self.N)]
-            return loss
+            self.plot_density_loss_on_trajectory()
+            return loss_history
+        
      
     # build pytorch network    
     def build_network(self, layers, act=nn.Tanh()):
@@ -258,14 +344,17 @@ class NeuralNetwork(nn.Module):
             init.xavier_normal_(linear_layer.weight)
             net.append(linear_layer)
             net.append(act)
-        return nn.Sequential(*net)
+        return nn.Sequential(*net).to(self.device)
 
     # predictors
     def net_v(self, rho):
         '''
         Standardized velocity
         '''
-        v_tanh = torch.square(self.velocity_network(rho))
+        # breakpoint()
+        # v_tanh = torch.square(self.velocity_network(rho))
+        v_tanh = self.velocity_network(rho)
+        return (v_tanh+1)/2 * self.max_speed * (1-rho) # scaled
         if self.max_speed is None:
             return v_tanh*(1-rho)
         else:
@@ -276,7 +365,6 @@ class NeuralNetwork(nn.Module):
         Standardized second derivative of the flux
         N_v[v] := f_rhorho = (rho*v(rho))_rhorho = 2*v_rho + rho*v(rho)_rhorho
         '''
-        rho.requires_grad_(True)
 
         f = rho*self.net_v(rho)
         f_drho = torch.autograd.grad(f, rho, torch.ones_like(f), create_graph=True)[0]
@@ -287,10 +375,11 @@ class NeuralNetwork(nn.Module):
         '''
         Characteristic speed
         '''
-        rho.requires_grad_(True)
+        # rho.requires_grad_(True)
         v_pred = self.net_v(rho)
         v_pred_du = torch.autograd.grad(v_pred, rho, grad_outputs=torch.ones_like(v_pred), create_graph=True)[0]
-        return v_pred + (rho + 1) * v_pred_du
+        # return v_pred + (rho + 1) * v_pred_du
+        return v_pred + rho * v_pred_du
         # return -self.max_speed * rho
 
     def net_u(self, t, x):
@@ -305,16 +394,11 @@ class NeuralNetwork(nn.Module):
         return the physics function f at position (t,x)
         N_rho[rho, v] := rho_t + F(rho) * rho_x - gamma^2 * rho_xx
         '''
-        t.requires_grad_(True)
-        x.requires_grad_(True)
         rho = self.net_u(t, x)
 
-        # Assuming rho is not scalar and needs grad_outputs for proper gradient computation
-        grad_outputs = torch.ones_like(rho)
-
-        rho_dt = torch.autograd.grad(rho, t, grad_outputs=grad_outputs, create_graph=True)[0]
-        rho_dx = torch.autograd.grad(rho, x, grad_outputs=grad_outputs, create_graph=True)[0]
-        rho_dxx = torch.autograd.grad(rho_dx, x, grad_outputs=grad_outputs, create_graph=True)[0]
+        rho_dt = torch.autograd.grad(rho, t, grad_outputs=torch.ones_like(rho), create_graph=True)[0]
+        rho_dx = torch.autograd.grad(rho, x, grad_outputs=torch.ones_like(rho), create_graph=True)[0]
+        rho_dxx = torch.autograd.grad(rho_dx, x, grad_outputs=torch.ones_like(rho_dx), create_graph=True)[0]
 
         f = rho_dt + self.net_F(rho) * rho_dx - self.gamma_var**2 * rho_dxx
         return f
@@ -335,7 +419,6 @@ class NeuralNetwork(nn.Module):
         return the physics function g for all agents at time t
         N_y[y_i] := x_t - v(rho(t, x(t)))
         '''
-        t.requires_grad_(True)
         x_trajectories = self.net_x(t)
 
         g = []

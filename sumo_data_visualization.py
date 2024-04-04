@@ -12,7 +12,8 @@ Nx, Nt = sumo.Nx, sumo.Nt # Number of spatial and temporal points (250, 420)
 L, Tmax = sumo.L, sumo.Tmax # Length of the road and maximum time (2.5, 7.0)
 
 rho = sumo.getDensity()  # density(time, position) (250, 420)
-# sumo.plotDensity()
+sumo.plotDensity()
+plt.show()
 # sumo.plotProbeDensity()
 t_train, x_train, rho_train, v_train = sumo.getMeasurements()
 Vf = np.amax(v_train[14]) # find the highest speed in the training data

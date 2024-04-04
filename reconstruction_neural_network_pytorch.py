@@ -70,6 +70,8 @@ class ReconstructionNeuralNetwork():
         # num_nodes_per_layer = int(5*L)
         num_hidden_layers = 5
         num_nodes_per_layer = 10
+        # num_hidden_layers = 8
+        # num_nodes_per_layer = 16
         layers_density = [2]  # There are two inputs: space and time
         for _ in range(num_hidden_layers):
             layers_density.append(num_nodes_per_layer)
@@ -78,6 +80,8 @@ class ReconstructionNeuralNetwork():
         # Trajectory network
         num_hidden_layers = 3  # min(max(int(3*L), 4), 15)
         num_nodes_per_layer = 5
+        # num_hidden_layers = 5  # min(max(int(3*L), 4), 15)
+        # num_nodes_per_layer = 10
         layers_trajectories = [1]  # There is one input: time
         for _ in range(num_hidden_layers):
             layers_trajectories.append(num_nodes_per_layer)
@@ -93,6 +97,7 @@ class ReconstructionNeuralNetwork():
                                             layers_density=layers_density, 
                                             layers_trajectories=layers_trajectories, 
                                             layers_speed=(1, 5, 5, 1),
+                                            # layers_speed=(1, 5, 5, 5, 1),
                                             max_speed=v_max, beta=0.05,
                                             N_epochs=300, N_lambda=10, 
                                             sigmas=sigmas, opt=opt) # Creation of the neural network
@@ -175,8 +180,9 @@ class ReconstructionNeuralNetwork():
 
         '''
         start = time()
-        self.neural_network.train()
+        loss_history = self.neural_network.train()
         hms(time() - start)
+        return loss_history
         
     def predict(self, t, x):
         '''
