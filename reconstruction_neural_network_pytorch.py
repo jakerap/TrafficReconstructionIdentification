@@ -90,6 +90,7 @@ class ReconstructionNeuralNetwork():
         sigmas = [1, 0.2, 0.5, 1, 0.5, 0, 1, 0.5, 0]
 
         # max of v is 1.96
+        self.max_speed = v_max
         t_train, x_train, u_train, v_train, X_f_train, t_g_train, u_v_train, v_max = self.createTrainingDataset(t, x, rho, v, v_max, L, Tmax, N_f, N_g, N_v) # Creation of standardized training dataset
         # max of v is 5.49 (due to scaling of time and space)
         self.neural_network = NeuralNetwork(t_train, x_train, u_train, v_train, 
@@ -202,10 +203,10 @@ class ReconstructionNeuralNetwork():
 
         '''
         
-        x = 2*(x - self.lb[0])/(self.ub[0] - self.lb[0])-1
-        t = 2*(t - self.lb[1])/(self.ub[1] - self.lb[1])-1
+        x = 2*(x - self.lb[0])/(self.ub[0] - self.lb[0])-1 # bring x to [-1, 1]
+        t = 2*(t - self.lb[1])/(self.ub[1] - self.lb[1])-1 # bring t to [-1, 1]
         
-        return self.neural_network(t, x)/2+0.5
+        return self.neural_network.net_u(t, x)/2+0.5 # from [-1, 1] to [0, 1]
     
     def predict_speed(self, rho):
         '''
@@ -223,9 +224,11 @@ class ReconstructionNeuralNetwork():
 
         '''
         
-        u = 2*rho-1
-        
-        return self.neural_network.predict_speed(u)*(self.ub[0] - self.lb[0]) / (self.ub[1] - self.lb[1])
+        rho = 2*rho-1 # bring rho to [-1, 1]
+        v_tanh = self.neural_network.predict_speed(rho)
+        v = (v_tanh+1)/2 * self.max_speed * (1-rho)
+        return v*(self.ub[0] - self.lb[0]) / (self.ub[1] - self.lb[1])
+        # return self.neural_network.predict_speed(rho)*(self.ub[0] - self.lb[0]) / (self.ub[1] - self.lb[1])
 
     def predict_F(self, rho):
         '''
@@ -243,7 +246,7 @@ class ReconstructionNeuralNetwork():
 
         '''
         
-        u = 2*rho-1
+        u = 2*rho-1 # bring rho to [-1, 1]
         
         return self.neural_network.predict_F(u)*(self.ub[0] - self.lb[0]) / (self.ub[1] - self.lb[1])
     
@@ -300,7 +303,8 @@ class ReconstructionNeuralNetwork():
         xstar = torch.from_numpy(XY_prediction[:, 1:2]).float()
 
         
-        rho_prediction = self.neural_network.net_u(tstar, xstar).reshape(Nx, Nt)
+        # rho_prediction = self.neural_network.net_u(tstar, xstar).reshape(Nx, Nt)
+        rho_prediction = self.predict(tstar, xstar).reshape(Nx, Nt)
         rho_prediction = rho_prediction.detach().numpy()
         t_pred = [(np.linspace(np.amin(self.t[i]), np.amax(self.t[i]), t.shape[0])).reshape(-1, 1) for i in range(self.Nxi)]
         X_prediction = self.predict_trajectories(t_pred)

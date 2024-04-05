@@ -170,7 +170,27 @@ class NeuralNetwork(nn.Module):
         plt.figure(figsize=(12, 6))  # Set figure size, adjust as needed
         
         # First subplot for predicted u values
-        plt.subplot(2, 2, 1)  # 1 row, 2 columns, subplot 1
+        plt.subplot(3, 3, 1)  # 1 row, 2 columns, subplot 1
+        for (t, x, u) in zip(self.t, self.x, self.u):  # No need to iterate over u for prediction plot
+            u_pred = self.net_u(t, x)
+            u_pred = u_pred.detach().numpy()
+            plt.scatter(t.detach().numpy(), x.detach().numpy(), c=u_pred, cmap='rainbow', vmin=-1, vmax=1, s=5)
+        plt.xlabel(r'Time [min]')
+        plt.ylabel(r'Position [km]')
+        plt.colorbar(label='Predicted u')
+        # plt.title('Predicted Values at data points')
+        plt.title('Predicted at data points')
+        
+        # Second subplot for actual u values
+        plt.subplot(3, 3, 2)  # 1 row, 2 columns, subplot 2
+        for (t, x, u) in zip(self.t, self.x, self.u):
+            plt.scatter(t.detach().numpy(), x.detach().numpy(), c=u.detach().numpy(), cmap='rainbow', vmin=-1, vmax=1, s=5)
+        plt.xlabel(r'Time [min]')
+        plt.ylabel(r'Position [km]')
+        plt.colorbar(label='Actual u')
+        plt.title('Actual Values')
+
+        plt.subplot(3, 3, 3)  # 1 row, 2 columns, subplot 1
         for (t, x, u) in zip(self.t, self.x, self.u):  # No need to iterate over u for prediction plot
             u_pred = self.net_u(t, x)
             u_pred = u_pred.detach().numpy()
@@ -180,17 +200,8 @@ class NeuralNetwork(nn.Module):
         plt.colorbar(label='Predicted u')
         # plt.title('Predicted Values at data points')
         plt.title('Prediction error at data points')
-        
-        # Second subplot for actual u values
-        plt.subplot(2, 2, 2)  # 1 row, 2 columns, subplot 2
-        for (t, x, u) in zip(self.t, self.x, self.u):
-            plt.scatter(t.detach().numpy(), x.detach().numpy(), c=u.detach().numpy(), cmap='rainbow', vmin=-1, vmax=1, s=5)
-        plt.xlabel(r'Time [min]')
-        plt.ylabel(r'Position [km]')
-        plt.colorbar(label='Actual u')
-        plt.title('Actual Values')
 
-        plt.subplot(2, 2, 3)  # 1 row, 2 columns, subplot 2
+        plt.subplot(3, 3, 4)  # 1 row, 2 columns, subplot 2
         u_pred = self.net_u(self.t_f, self.x_f)
         plt.scatter(self.t_f.detach().numpy(), self.x_f.detach().numpy(), c=u_pred.detach().numpy(), cmap='rainbow', vmin=-1, vmax=1, s=15)
         plt.xlabel(r'Time [min]')
@@ -216,12 +227,24 @@ class NeuralNetwork(nn.Module):
         # Reshape the flat predictions back into the grid shape for plotting
         u_pred_grid = u_pred_flat.reshape(t_grid.shape)
 
-        plt.subplot(2, 2, 4)  # 1 row, 2 columns, subplot 2
+        plt.subplot(3, 3, 5)  
         plt.pcolormesh(t_grid, x_grid, u_pred_grid, cmap='rainbow', shading='auto', vmin=-1, vmax=1)
         plt.xlabel(r'Time [min]')
         plt.ylabel(r'Position [km]')
         plt.colorbar(label='Predicted u')
         plt.title('Predicted Values at Physics Points')
+
+        # fundamental diagram
+        plt.subplot(3, 3, 6)
+        rho = np.linspace(-1, 1, 100)
+        rho = torch.tensor(rho, dtype=torch.float32).unsqueeze(1)
+        v_pred = self.predict_speed(rho)
+        for (t, x, u, v) in zip(self.t, self.x, self.u, self.v):
+            plt.scatter(u.detach().numpy(), v.detach().numpy(), c='blue', s=5)
+        # plt.plot(rho.detach().numpy(), v, c='red')
+        rho = np.linspace(-1,1,100)
+        plt.plot(rho, v_pred, c='red')
+
         
         plt.tight_layout()  # Adjust layout
         plt.show()
@@ -258,8 +281,8 @@ class NeuralNetwork(nn.Module):
             "MSEu1": MSEu1,
             # "MSEtrajectories": MSEtrajectories,
             # "MSEtrajectories": MSEtrajectories0,
-            # "MSEv1": MSEv1,
-            # "MSEv2": MSEv2
+            "MSEv1": MSEv1,
+            "MSEv2": MSEv2
         }
 
 
@@ -273,7 +296,7 @@ class NeuralNetwork(nn.Module):
         return {
             # "MSEf": MSEf,
             # "MSEg": MSEg,
-        #    "MSEv": MSEv
+           "MSEv": MSEv
         }
 
         
@@ -297,10 +320,10 @@ class NeuralNetwork(nn.Module):
 
         
         # Define the optimizer
-        optimizer = optim.Adam(self.parameters(), lr=0.001)
+        optimizer = optim.Adam(self.parameters(), lr=0.005)
        
         # Train the model
-        self.N_epochs = 2000
+        self.N_epochs = 3000
         # self.plot_density_loss_on_trajectory()
         with tqdm(total=self.N_epochs, desc="Training Progress") as pbar:
             for epoch in range(self.N_epochs):
@@ -355,7 +378,7 @@ class NeuralNetwork(nn.Module):
         # v_tanh = torch.square(self.velocity_network(rho))
         v_tanh = self.velocity_network(rho)
         return (v_tanh+1)/2 * self.max_speed * (1-rho) # scaled
-        if self.max_speed is None:
+        if self.max_speed is not None:
             return v_tanh*(1-rho)
         else:
             return (v_tanh*(1+rho)/2 + self.max_speed)*(1-rho)/2

@@ -25,37 +25,37 @@ x_f_train = X_f_train[:, 0:1] # space data points for the PDE [500, 1]
 t_f_train = X_f_train[:, 1:2] # time data points for the PDE [500, 1]
 
 # scatter plot of all training data locations for density
-plt.figure()
-plt.scatter(x_f_train, t_f_train, c='b', s=1)
-for i in range(len(t_train)):
-    plt.scatter(t_train[i], x_train[i], c='r', s=3)
-plt.xlabel('Time')
-plt.ylabel('Position')
-plt.title('Training data locations')
-plt.xlim([-1, 1])
-plt.ylim([-1, 1])
-plt.grid()
-
-
-plt.figure()
-plt.plot(u_v_train, np.zeros_like(u_v_train), 'rx')
-plt.ylabel('Velocity')
-plt.title('Training data locations')
+# plt.figure()
+# plt.scatter(x_f_train, t_f_train, c='b', s=1)
+# for i in range(len(t_train)):
+#     plt.scatter(t_train[i], x_train[i], c='r', s=3)
+# plt.xlabel('Time')
+# plt.ylabel('Position')
+# plt.title('Training data locations')
 # plt.xlim([-1, 1])
 # plt.ylim([-1, 1])
-plt.grid()
+# plt.grid()
 
 
-fig = plt.figure('FD', figsize=(7.5, 5))
-colors = plt.cm.rainbow(np.linspace(0, 1, len(u_train)))
+# plt.figure()
+# plt.plot(u_v_train, np.zeros_like(u_v_train), 'rx')
+# plt.ylabel('Velocity')
+# plt.title('Training data locations')
+# # plt.xlim([-1, 1])
+# # plt.ylim([-1, 1])
+# plt.grid()
 
-for (u, v, color) in zip(u_train, v_train, colors):
-    plt.scatter(u, v, color=color, s=5)
 
-plt.xlabel(r'Density [veh/km]')
-plt.ylabel(r'Speed [km/min]')
-plt.tight_layout()
-plt.show()
+# fig = plt.figure('FD', figsize=(7.5, 5))
+# colors = plt.cm.rainbow(np.linspace(0, 1, len(u_train)))
+
+# for (u, v, color) in zip(u_train, v_train, colors):
+#     plt.scatter(u, v, color=color, s=5)
+
+# plt.xlabel(r'Density [veh/km]')
+# plt.ylabel(r'Speed [km/min]')
+# plt.tight_layout()
+# plt.show()
 
 
 
@@ -63,4 +63,5 @@ plt.show()
 # sumo.plotProbeFD()
 # plt.show()
 
-# sumo.plotDensityMovie()
+# sumo.plotDensityMovieHeatmap()
+sumo.plotDensityMovie()

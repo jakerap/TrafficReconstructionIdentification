@@ -103,15 +103,19 @@ class Sumo():
         plt.colorbar()
         plt.show()
 
-    def plotDensityMovie(self):
+    
+
+    def plotDensityMovieHeatmap(self):
         # Setting up the figure for the animation
-        fig, ax = plt.subplots(figsize=(7.5, 5))
+        fig, ax = plt.subplots(figsize=(10, 1))
         # Placeholder for the heatmap
-        heatmap = ax.imshow(np.flipud(self.u[:, 0][:, np.newaxis]), extent=[0, 420, 0, 250], cmap='rainbow', vmin=0.0, vmax=1, aspect='auto')
-        plt.colorbar(heatmap, ax=ax)
-        ax.set_xlabel('Time [sec]')
-        ax.set_ylabel('Position [m]')
-        time_text = ax.text(0.02, 0.95, '', transform=ax.transAxes)  # Placeholder for time annotation
+        heatmap = ax.imshow(np.flipud(self.u[:, 0][:, np.newaxis].T), extent=[0, 420, 0, 250], cmap='inferno', vmin=0.0, vmax=1, aspect='auto')
+
+        ax.set_xlabel('Position [km]')
+        ax.set_yticks([])  # Remove ticks on y-axis
+        ax.set_xticks([]) 
+        # ax.set_xticks([0, 500, 1000, 1500, 2000, 2500])  # Set ticks on x-axis
+        time_text = ax.text(0.83, 0.85, '', transform=ax.transAxes, color='white')  # Placeholder for time annotation
 
         # Initialization function for the animation
         def init():
@@ -124,15 +128,45 @@ class Sumo():
             current_data = self.u[:, frame]
             if current_data.ndim == 1:
                 current_data = current_data[:, np.newaxis]
-            heatmap.set_data(np.flipud(current_data))  # Update the heatmap for the current frame
-            time_text.set_text(f'Time: {frame:.2f} sec')  # Update time annotation
+            heatmap.set_data(np.flipud(current_data).T)  # Update the heatmap for the current frame
+            time_text.set_text(f'Time: {frame:.2f} s')  # Update time annotation
             return heatmap, time_text
 
         # Creating the animation
         ani = FuncAnimation(fig, update, frames=int(420), init_func=init, blit=True)
 
+        # Save the animation in transparant
+        ani.save('heatmap_animation.gif', writer='pillow', fps=50, dpi=400, savefig_kwargs={'transparent': True})
+
+
+    def plotDensityMovie(self):
+        # Setting up the figure for the animation
+        breakpoint()
+        fig, ax = plt.subplots(figsize=(10, 6))
+        line, = ax.plot([], [], lw=2)  # Initialize an empty line plot
+        ax.set_xlim(0, 249)  # Assuming x-axis represents the position, adjust as needed
+        ax.set_ylim(0, np.max(self.u))  # Adjust y-axis limits based on your data range
+        ax.set_xlabel('Position [km]')
+        ax.set_ylabel('Amplitude')
+        time_text = ax.text(0.83, 0.85, '', transform=ax.transAxes)  # Placeholder for time annotation
+        self.u = np.flipud(self.u)
+
+        # Initialization function for the animation
+        def init():
+            line.set_data([], [])
+            return line,
+
+        # Update function for each frame
+        def update(frame):
+            line.set_data(range(250), self.u[:, frame])  # Update the line plot for the current frame
+            time_text.set_text(f'Time: {frame:.2f} s')  # Update time annotation
+            return line, time_text
+
+        # Creating the animation
+        ani = FuncAnimation(fig, update, frames=420, init_func=init, blit=True)
+
         # Save the animation
-        ani.save('heatmap_animation.gif', writer='pillow', fps=30)  
+        ani.save('lineplot_animation.gif', writer='pillow', fps=50, dpi=50)
 
     
     def plotProbeFD(self):
