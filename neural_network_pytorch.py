@@ -241,11 +241,44 @@ class NeuralNetwork(nn.Module):
         v_pred = self.predict_speed(rho)
         for (t, x, u, v) in zip(self.t, self.x, self.u, self.v):
             plt.scatter(u.detach().numpy(), v.detach().numpy(), c='blue', s=5)
-        # plt.plot(rho.detach().numpy(), v, c='red')
         rho = np.linspace(-1,1,100)
         plt.plot(rho, v_pred, c='red')
 
-        
+        # density over position at different times
+        plt.subplot(3, 3, 7)  # 1 row, 2 columns, subplot 1
+        x = np.linspace(-1, 1, 100)
+        x = torch.tensor(x, dtype=torch.float32).unsqueeze(1)
+        u_pred = self.net_u(torch.ones_like(x)*-1, x)
+        x = x.detach().numpy()
+        u_pred = u_pred.detach().numpy()
+        plt.plot(x, u_pred, c='red')
+        plt.xlabel(r'Position [km]')
+        plt.ylabel(r'Density')
+        plt.grid()
+        plt.title('Density prediction at time -1')
+
+        plt.subplot(3, 3, 8)  # 1 row, 2 columns, subplot 1
+        x = np.linspace(-1, 1, 100)
+        x = torch.tensor(x, dtype=torch.float32).unsqueeze(1)
+        u_pred = self.net_u(torch.ones_like(x)*0, x)
+        u_pred = u_pred.detach().numpy()
+        plt.plot(x.detach().numpy(), u_pred, c='red')
+        plt.xlabel(r'Position [km]')
+        plt.ylabel(r'Density')
+        plt.grid()
+        plt.title('Density prediction at time 0')
+
+        plt.subplot(3, 3, 9)  # 1 row, 2 columns, subplot 1
+        x = np.linspace(-1, 1, 100)
+        x = torch.tensor(x, dtype=torch.float32).unsqueeze(1)
+        u_pred = self.net_u(torch.ones_like(x), x)
+        u_pred = u_pred.detach().numpy()
+        plt.plot(x.detach().numpy(), u_pred, c='red')
+        plt.xlabel(r'Position [km]')
+        plt.ylabel(r'Density')
+        plt.grid()
+        plt.title('Density prediction at time 1')        
+
         plt.tight_layout()  # Adjust layout
         plt.show()
 
@@ -318,12 +351,11 @@ class NeuralNetwork(nn.Module):
         # losses tracking
         loss_history = {}
 
-        
         # Define the optimizer
         optimizer = optim.Adam(self.parameters(), lr=0.005)
        
         # Train the model
-        self.N_epochs = 3000
+        self.N_epochs = 10000
         # self.plot_density_loss_on_trajectory()
         with tqdm(total=self.N_epochs, desc="Training Progress") as pbar:
             for epoch in range(self.N_epochs):
