@@ -226,8 +226,8 @@ class ReconstructionNeuralNetwork():
         
         rho = 2*rho-1 # bring rho to [-1, 1]
         v_tanh = self.neural_network.predict_speed(rho)
-        v = (v_tanh+1)/2 * self.max_speed * (1-rho)
-        return v*(self.ub[0] - self.lb[0]) / (self.ub[1] - self.lb[1])
+        #v = (v_tanh+1)/2 * self.max_speed * (1-rho)
+        return v_tanh*(self.ub[0] - self.lb[0]) / (self.ub[1] - self.lb[1])
         # return self.neural_network.predict_speed(rho)*(self.ub[0] - self.lb[0]) / (self.ub[1] - self.lb[1])
 
     def predict_F(self, rho):

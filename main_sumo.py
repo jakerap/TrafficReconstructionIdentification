@@ -43,6 +43,28 @@ def plot_losses(loss_history):
     plt.tight_layout(rect=[0, 0.03, 1, 0.95])  # Adjust the layout to make room for the suptitle
     plt.show()
 
+
+def plot_parameters(gamma_var_history, noise_rho_bar_history):
+    fig, ax = plt.subplots(2, 1, figsize=(15, 10))
+    fig.suptitle('Parameter History')
+
+    ax[0].plot(gamma_var_history)
+    ax[0].set_title('Gamma Variance')
+    ax[0].set_xlabel('Epoch')
+    ax[0].set_ylabel('Variance')
+    ax[0].grid(True)
+
+    ax[1].plot(noise_rho_bar_history)
+    ax[1].set_title('Noise Rho Bar')
+    ax[1].set_xlabel('Epoch')
+    ax[1].set_ylabel('Value')
+    ax[1].grid(True)
+
+    plt.tight_layout(rect=[0, 0.03, 1, 0.95])  # Adjust the layout to make room for the suptitle
+    plt.show()
+
+
+
 scenario = 'highway'
 
 sumo = s.Sumo(scenario)
@@ -58,8 +80,9 @@ Vf = np.amax(v_train[14]) # find the highest speed in the training data\
 trained_neural_network = rn.ReconstructionNeuralNetwork(t_train, x_train, rho_train, v_train,
                                                     L, Tmax, N_f=500, N_g=50, opt=9, v_max=Vf)
 
-loss_history = trained_neural_network.train()
+loss_history, gamma_var_history, noise_rho_bar_history = trained_neural_network.train()
 plot_losses(loss_history)
+plot_parameters(gamma_var_history, noise_rho_bar_history)
 
 
 trained_neural_network.plot(axisPlot, rho)

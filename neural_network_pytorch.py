@@ -105,19 +105,18 @@ class NeuralNetwork(nn.Module):
         self.N = len(self.x)  # Number of agents
         self.max_speed = max_speed
 
-        print_data_ranges(self.t, "t")
-        print_data_ranges(self.x, "x")
-        print_data_ranges(self.u, "u")
-        print_data_ranges(self.v, "v")
-        print_data_ranges(self.x_f, "x_f")
-        print_data_ranges(self.t_f, "t_f")
-        print_data_ranges(self.t_g, "t_g")
-        print_data_ranges(self.u_v, "u_v")
+        # print_data_ranges(self.t, "t")
+        # print_data_ranges(self.x, "x")
+        # print_data_ranges(self.u, "u")
+        # print_data_ranges(self.v, "v")
+        # print_data_ranges(self.x_f, "x_f")
+        # print_data_ranges(self.t_f, "t_f")
+        # print_data_ranges(self.t_g, "t_g")
+        # print_data_ranges(self.u_v, "u_v")
 
-
-        self.gamma_var = torch.tensor(1e-2, dtype=torch.float32, requires_grad=True) # Viscosity parameter
-        self.noise_rho_bar = [torch.tensor(torch.randn(1, 1) * 0.001, dtype=torch.float32, requires_grad=True) 
-                              for _ in range(self.N)] # Noise for the density
+        # learnable parameters
+        self.gamma_var = torch.nn.Parameter(torch.tensor(1e-2, dtype=torch.float32), requires_grad=True)  # Correct use of dtype # Viscosity parameter
+        self.noise_rho_bar = [torch.nn.Parameter(torch.randn(1, 1) * 0.001, requires_grad=True) for _ in range(self.N)] # Noise for the density
 
 
         # build density network
@@ -239,10 +238,15 @@ class NeuralNetwork(nn.Module):
         rho = np.linspace(-1, 1, 100)
         rho = torch.tensor(rho, dtype=torch.float32).unsqueeze(1)
         v_pred = self.predict_speed(rho)
+        F_pred = self.predict_F(rho)
         for (t, x, u, v) in zip(self.t, self.x, self.u, self.v):
             plt.scatter(u.detach().numpy(), v.detach().numpy(), c='blue', s=5)
         rho = np.linspace(-1,1,100)
         plt.plot(rho, v_pred, c='red')
+        plt.plot(rho, F_pred, c='green')
+        # plt.plot(rho, ((rho+1)/2)*v_pred, c='purple')
+        
+        plt.legend(['v', 'F', 'rho*v'])
 
         # density over position at different times
         plt.subplot(3, 3, 7)  # 1 row, 2 columns, subplot 1
@@ -288,7 +292,7 @@ class NeuralNetwork(nn.Module):
 
         # breakpoint()
         # Predictions
-        u_pred = [self.net_u(self.t[i], self.x[i]) - self.noise_rho_bar[i]*0 for i in range(len(self.t))] # list of tensors, since each tensor has a different shape
+        u_pred = [self.net_u(self.t[i], self.x[i]) - self.noise_rho_bar[i] for i in range(len(self.t))] # list of tensors, since each tensor has a different shape
         v_pred = [self.net_v(self.u[i]) for i in range(len(self.t))]
         # x_pred = [self.net_x_pv(t[i], i) for i in range(len(t))]  # data points or physics points?
         # x_pred0 = self.net_x_pv(t[0], 0)
@@ -325,11 +329,13 @@ class NeuralNetwork(nn.Module):
         MSEf = torch.mean(f_pred**2)  # Residual of PDE Predictions flux function
         # MSEg = torch.mean(g_pred**2)  # Residual of PDE Predictions g function
         MSEv = torch.mean(torch.relu(self.net_ddf(self.u_v))**2)  # Placeholder, adjust as needed
+        MSEgamma = self.gamma_var**2
 
         return {
             # "MSEf": MSEf,
             # "MSEg": MSEg,
-           "MSEv": MSEv
+            "MSEv": MSEv,
+            "MSEgamma": MSEgamma
         }
 
         
@@ -350,12 +356,24 @@ class NeuralNetwork(nn.Module):
 
         # losses tracking
         loss_history = {}
+        gamma_var_history = []
+        noise_rho_bar_history = []
+
+        # breakpoint()
 
         # Define the optimizer
+        # all_params = list(self.density_network.parameters()) + list(self.velocity_network.parameters())
         optimizer = optim.Adam(self.parameters(), lr=0.005)
+        optimizer = optim.Adam([
+            {'params': self.parameters()},  # Parameters of sub-modules
+            # {'params': [self.gamma_var]},  # Explicitly add gamma_var
+            {'params': self.noise_rho_bar}  # Explicitly add all tensors in noise_rho_bar
+        ], lr=0.005)
+        # optimizer = optim.Adam(list(self.parameters()) + [self.gamma_var] + [*self.noise_rho_bar], lr=0.005)
+        # optimizer = optim.LBFGS(self.parameters(), lr=0.005)
        
         # Train the model
-        self.N_epochs = 10000
+        self.N_epochs = 4000
         # self.plot_density_loss_on_trajectory()
         with tqdm(total=self.N_epochs, desc="Training Progress") as pbar:
             for epoch in range(self.N_epochs):
@@ -366,13 +384,13 @@ class NeuralNetwork(nn.Module):
                 loss = sum(losses_data.values()) + sum(losses_physics.values())
                 # loss = sum([self.sigmas[i]*losses[key] for i, key in enumerate(losses.keys())])
   
-
                 loss.backward()
                 optimizer.step()
 
+                # print(self.gamma_var, self.noise_rho_bar[0])
+
                 pbar.set_postfix({'loss': loss.item()})
                 pbar.update(1)
-
 
                 combined_losses = {**losses_data, **losses_physics}
                 for key, value in combined_losses.items():
@@ -380,15 +398,15 @@ class NeuralNetwork(nn.Module):
                         loss_history[key] = []
                     # Assuming the loss values are tensors, use .item() to get Python numbers
                     loss_history[key].append(value.item())
-
-
                 
-                if epoch % self.N_lambda == 0:
-                    pass
-                    # self.gamma_var = self.gamma_var - 0.1 * self.gamma_var.grad
-                    # self.noise_rho_bar = [self.noise_rho_bar[i] - 0.1 * self.noise_rho_bar[i].grad for i in range(self.N)]
+
+                gamma_var_history.append(self.gamma_var.item())
+                noise_rho_bar_history.append([tensor.item() for tensor in self.noise_rho_bar])
+
+               
+            # breakpoint()
             self.plot_density_loss_on_trajectory()
-            return loss_history
+            return loss_history, gamma_var_history, noise_rho_bar_history
         
      
     # build pytorch network    
@@ -432,9 +450,10 @@ class NeuralNetwork(nn.Module):
         '''
         # rho.requires_grad_(True)
         v_pred = self.net_v(rho)
-        v_pred_du = torch.autograd.grad(v_pred, rho, grad_outputs=torch.ones_like(v_pred), create_graph=True)[0]
-        # return v_pred + (rho + 1) * v_pred_du
-        return v_pred + rho * v_pred_du
+        v_pred_drho = torch.autograd.grad(v_pred, rho, grad_outputs=torch.ones_like(v_pred), create_graph=True)[0]
+        return v_pred + (rho + 1)/2 * v_pred_drho
+        # return v_pred + (rho + 1) * v_pred_drho # good?
+        return v_pred + rho * v_pred_drho
         # return -self.max_speed * rho
 
     def net_u(self, t, x):
