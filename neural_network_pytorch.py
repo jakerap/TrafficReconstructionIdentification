@@ -292,21 +292,24 @@ class NeuralNetwork(nn.Module):
 
         # breakpoint()
         # Predictions
-        u_pred = [self.net_u(self.t[i], self.x[i]) - self.noise_rho_bar[i] for i in range(len(self.t))] # list of tensors, since each tensor has a different shape
+        u_pred = [self.net_u(self.t[i], self.x[i]) - self.noise_rho_bar[i]*0 for i in range(len(self.t))] # list of tensors, since each tensor has a different shape
+        x_pred = [self.net_x_pv(self.t[i], i) for i in range(len(self.t))]  
+        u_pred_pv_position = [self.net_u(self.t[i], x_pred[i]) - self.noise_rho_bar[i]*0 for i in range(len(self.t))]
         v_pred = [self.net_v(self.u[i]) for i in range(len(self.t))]
-        x_pred = [self.net_x_pv(self.t[i], i) for i in range(len(self.t))]  # data points or physics points?
-        # x_pred0 = self.net_x_pv(t[0], 0)
-        # x_pred = torch.stack([self.net_x_pv(t_g[i], i) for i in range(len(t_g))]) # data points or physics points?
 
         # Data Losses
+
+        # L_2
         MSEu1_list = [F.mse_loss(self.u[i], u_pred[i]) for i in range(len(self.u))] # L_2
         MSEu1 = torch.mean(torch.stack(MSEu1_list))  # MSE for Adjusted Density Predictions (rho_pred - rho_true - noise)^2
 
-        # # MSEu2_l
+        # L_4
+        MSEu2_list = [F.mse_loss(self.u[i], u_pred_pv_position[i]) for i in range(len(self.u))] # L_4
+        MSEu2 = torch.mean(torch.stack(MSEu2_list))  
+
+        # MSEu2_l
         MSEtrajectories_list = [F.mse_loss(self.x[i], x_pred[i]) for i in range(len(self.x))]
         MSEtrajectories = torch.mean(torch.stack(MSEtrajectories_list))  # MSE for Trajectories Predictions (x_pred - x_true)^2
-        # MSEtrajectories0 = F.mse_loss(x[0].squeeze(0), x_pred0.squeeze(0))  # MSE for Trajectories Predictions (x_pred - x_true)^2
-
 
         MSEv1_list = [F.mse_loss(self.v[i], v_pred[i]) for i in range(len(self.v))] # L_3
         MSEv1 = torch.mean(torch.stack(MSEv1_list))  # MSE for Adjusted Density Predictions (rho_pred - rho_true - noise)^2
@@ -316,8 +319,8 @@ class NeuralNetwork(nn.Module):
 
         return {
             "MSEu1": MSEu1,
+            "MSEu2": MSEu2,
             "MSEtrajectories": MSEtrajectories,
-            # "MSEtrajectories": MSEtrajectories0,
             "MSEv1": MSEv1,
             "MSEv2": MSEv2
         }
@@ -325,17 +328,17 @@ class NeuralNetwork(nn.Module):
 
     def calculate_physics_losses(self):
         f_pred = self.net_f(self.t_f, self.x_f)
-        # g_pred = self.net_g(self.t_g)
+        g_pred = self.net_g(self.t_g)
         MSEf = torch.mean(f_pred**2)  # Residual of PDE Predictions flux function
-        # MSEg = torch.mean(g_pred**2)  # Residual of PDE Predictions g function
+        MSEg = torch.mean(torch.stack(g_pred)**2) # Residual of PDE Predictions g function
         MSEv = torch.mean(torch.relu(self.net_ddf(self.u_v))**2)  # Placeholder, adjust as needed
         MSEgamma = self.gamma_var**2
 
         return {
             # "MSEf": MSEf,
-            # "MSEg": MSEg,
+            "MSEg": MSEg,
             "MSEv": MSEv,
-            # "MSEgamma": MSEgamma
+            "MSEgamma": MSEgamma
         }
 
         
@@ -374,7 +377,7 @@ class NeuralNetwork(nn.Module):
         # optimizer = optim.LBFGS(self.parameters(), lr=0.005)
        
         # Train the model
-        self.N_epochs = 400
+        self.N_epochs = 4000
         # self.plot_density_loss_on_trajectory()
         with tqdm(total=self.N_epochs, desc="Training Progress") as pbar:
             for epoch in range(self.N_epochs):
@@ -489,19 +492,41 @@ class NeuralNetwork(nn.Module):
         output = [self.net_x_pv(t[i], i) for i in range(self.N)]
         return output
     
+    # def net_g(self, t):
+    #     '''
+    #     return the physics function g for all agents at time t
+    #     N_y[y_i] := x_t - v(rho(t, x(t)))
+    #     '''
+    #     x_trajectories = self.net_x(t)
+
+    #     g = []
+    #     for i in range(len(x_trajectories)):
+    #         grad_outputs = torch.ones_like(x_trajectories[i])
+    #         x_dt = torch.autograd.grad(x_trajectories[i], t[i], grad_outputs=grad_outputs, create_graph=True)[0]
+    #         rho = self.net_u(t[i], x_trajectories[i])
+    #         g.append(x_dt - self.net_v(rho))
+    #     return g
+    
+
     def net_g(self, t):
         '''
         return the physics function g for all agents at time t
         N_y[y_i] := x_t - v(rho(t, x(t)))
         '''
-        x_trajectories = self.net_x(t)
 
         g = []
-        for i in range(len(x_trajectories)):
-            grad_outputs = torch.ones_like(x_trajectories[i])
-            x_dt = torch.autograd.grad(x_trajectories[i], t[i], grad_outputs=grad_outputs, create_graph=True)[0]
-            rho = self.net_u(t[i], x_trajectories[i])
-            g.append(x_dt - self.net_v(rho))
+
+        for i in range(len(t)):
+
+            x_trajectories = self.net_x_pv(t[i], i)# - self.noise_rho_bar[i] # TODO: is the noise needed?
+
+            x_dt = torch.autograd.grad(x_trajectories, t, grad_outputs=torch.ones_like(x_trajectories), create_graph=True)[0] # have to use the whole t and then select the i-th element
+            # print(x_dt[i])
+            rho = self.net_u(t[i], x_trajectories)
+            # breakpoint()
+            g.append(x_dt[i] - self.net_v(rho))
+
+        # breakpoint()
         return g
     
     def predict_speed(self, u):

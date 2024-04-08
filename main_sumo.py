@@ -78,7 +78,7 @@ axisPlot = sumo.getAxisPlot()
 Vf = np.amax(v_train[14]) # find the highest speed in the training data\
 
 trained_neural_network = rn.ReconstructionNeuralNetwork(t_train, x_train, rho_train, v_train,
-                                                    L, Tmax, N_f=500, N_g=50, opt=9, v_max=Vf)
+                                                    L, Tmax, N_f=50, N_g=50, opt=9, v_max=Vf)
 
 loss_history, gamma_var_history, noise_rho_bar_history = trained_neural_network.train()
 plot_losses(loss_history)
