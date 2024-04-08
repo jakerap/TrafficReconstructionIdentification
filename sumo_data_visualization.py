@@ -60,8 +60,8 @@ t_f_train = X_f_train[:, 1:2] # time data points for the PDE [500, 1]
 
 
 # sumo.plotProbeVehicles()
-# sumo.plotProbeFD()
-# plt.show()
+sumo.plotProbeFD()
+plt.show()
 
 # sumo.plotDensityMovieHeatmap()
 # sumo.plotProbes()

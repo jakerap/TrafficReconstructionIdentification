@@ -294,7 +294,7 @@ class NeuralNetwork(nn.Module):
         # Predictions
         u_pred = [self.net_u(self.t[i], self.x[i]) - self.noise_rho_bar[i] for i in range(len(self.t))] # list of tensors, since each tensor has a different shape
         v_pred = [self.net_v(self.u[i]) for i in range(len(self.t))]
-        # x_pred = [self.net_x_pv(t[i], i) for i in range(len(t))]  # data points or physics points?
+        x_pred = [self.net_x_pv(self.t[i], i) for i in range(len(self.t))]  # data points or physics points?
         # x_pred0 = self.net_x_pv(t[0], 0)
         # x_pred = torch.stack([self.net_x_pv(t_g[i], i) for i in range(len(t_g))]) # data points or physics points?
 
@@ -303,8 +303,8 @@ class NeuralNetwork(nn.Module):
         MSEu1 = torch.mean(torch.stack(MSEu1_list))  # MSE for Adjusted Density Predictions (rho_pred - rho_true - noise)^2
 
         # # MSEu2_l
-        # MSEtrajectories_list = [F.mse_loss(x[i], x_pred[i]) for i in range(len(x))]
-        # MSEtrajectories = torch.mean(torch.stack(MSEtrajectories_list))  # MSE for Trajectories Predictions (x_pred - x_true)^2
+        MSEtrajectories_list = [F.mse_loss(self.x[i], x_pred[i]) for i in range(len(self.x))]
+        MSEtrajectories = torch.mean(torch.stack(MSEtrajectories_list))  # MSE for Trajectories Predictions (x_pred - x_true)^2
         # MSEtrajectories0 = F.mse_loss(x[0].squeeze(0), x_pred0.squeeze(0))  # MSE for Trajectories Predictions (x_pred - x_true)^2
 
 
@@ -316,7 +316,7 @@ class NeuralNetwork(nn.Module):
 
         return {
             "MSEu1": MSEu1,
-            # "MSEtrajectories": MSEtrajectories,
+            "MSEtrajectories": MSEtrajectories,
             # "MSEtrajectories": MSEtrajectories0,
             "MSEv1": MSEv1,
             "MSEv2": MSEv2
@@ -335,7 +335,7 @@ class NeuralNetwork(nn.Module):
             # "MSEf": MSEf,
             # "MSEg": MSEg,
             "MSEv": MSEv,
-            "MSEgamma": MSEgamma
+            # "MSEgamma": MSEgamma
         }
 
         
@@ -365,15 +365,16 @@ class NeuralNetwork(nn.Module):
         # all_params = list(self.density_network.parameters()) + list(self.velocity_network.parameters())
         optimizer = optim.Adam(self.parameters(), lr=0.005)
         optimizer = optim.Adam([
-            {'params': self.parameters()},  # Parameters of sub-modules
-            # {'params': [self.gamma_var]},  # Explicitly add gamma_var
-            {'params': self.noise_rho_bar}  # Explicitly add all tensors in noise_rho_bar
+            {'params': self.density_network.parameters()},
+            {'params': self.velocity_network.parameters()},
+            {'params': [p for traj_net in self.trajectories_networks for p in traj_net.parameters()]}, # added this way sucht that it is optimized as well
+            {'params': self.noise_rho_bar}  # Assuming noise_rho_bar is a list of parameters/tensors
         ], lr=0.005)
         # optimizer = optim.Adam(list(self.parameters()) + [self.gamma_var] + [*self.noise_rho_bar], lr=0.005)
         # optimizer = optim.LBFGS(self.parameters(), lr=0.005)
        
         # Train the model
-        self.N_epochs = 4000
+        self.N_epochs = 400
         # self.plot_density_loss_on_trajectory()
         with tqdm(total=self.N_epochs, desc="Training Progress") as pbar:
             for epoch in range(self.N_epochs):
