@@ -101,7 +101,21 @@ class NeuralNetwork(nn.Module):
         self.t_f = torch.tensor(X_f[:, 1:2], dtype=torch.float32, requires_grad=True) # time data points for the PDE [500, 1]
         self.t_g = torch.tensor(t_g, dtype=torch.float32, requires_grad=True) # time data points for the PDE 16*[50, 1]
         self.u_v = torch.tensor(u_v, dtype=torch.float32, requires_grad=True) # density data points for the PDE [50, 1]
-        
+
+        # weights of the losses
+        self.lambdas = {
+            "MSEf": torch.tensor(1, dtype=torch.float32, requires_grad=True),
+            "MSEg": torch.tensor(1, dtype=torch.float32, requires_grad=True),
+            "MSEv": torch.tensor(1, dtype=torch.float32, requires_grad=True),
+            "MSEgamma": torch.tensor(1, dtype=torch.float32, requires_grad=True),
+            "MSEu1": torch.tensor(1, dtype=torch.float32, requires_grad=True),
+            "MSEu2": torch.tensor(1, dtype=torch.float32, requires_grad=True),
+            "MSEtrajectories": torch.tensor(1, dtype=torch.float32, requires_grad=True),
+            "MSEv1": torch.tensor(1, dtype=torch.float32, requires_grad=True),
+            "MSEv2":torch.tensor(1, dtype=torch.float32, requires_grad=True)
+        }
+
+
         self.N = len(self.x)  # Number of agents
         self.max_speed = max_speed
 
@@ -290,14 +304,11 @@ class NeuralNetwork(nn.Module):
 
     def calculate_data_losses(self):
 
-        # breakpoint()
         # Predictions
-        u_pred = [self.net_u(self.t[i], self.x[i]) - self.noise_rho_bar[i]*0 for i in range(len(self.t))] # list of tensors, since each tensor has a different shape
+        u_pred = [self.net_u(self.t[i], self.x[i]) - self.noise_rho_bar[i] for i in range(len(self.t))] # list of tensors, since each tensor has a different shape
         x_pred = [self.net_x_pv(self.t[i], i) for i in range(len(self.t))]  
-        u_pred_pv_position = [self.net_u(self.t[i], x_pred[i]) - self.noise_rho_bar[i]*0 for i in range(len(self.t))]
+        u_pred_pv_position = [self.net_u(self.t[i], x_pred[i]) - self.noise_rho_bar[i] for i in range(len(self.t))]
         v_pred = [self.net_v(self.u[i]) for i in range(len(self.t))]
-
-        # Data Losses
 
         # L_2
         MSEu1_list = [F.mse_loss(self.u[i], u_pred[i]) for i in range(len(self.u))] # L_2
@@ -307,13 +318,15 @@ class NeuralNetwork(nn.Module):
         MSEu2_list = [F.mse_loss(self.u[i], u_pred_pv_position[i]) for i in range(len(self.u))] # L_4
         MSEu2 = torch.mean(torch.stack(MSEu2_list))  
 
-        # MSEu2_l
+        # L_1
         MSEtrajectories_list = [F.mse_loss(self.x[i], x_pred[i]) for i in range(len(self.x))]
         MSEtrajectories = torch.mean(torch.stack(MSEtrajectories_list))  # MSE for Trajectories Predictions (x_pred - x_true)^2
 
+        # L_3
         MSEv1_list = [F.mse_loss(self.v[i], v_pred[i]) for i in range(len(self.v))] # L_3
         MSEv1 = torch.mean(torch.stack(MSEv1_list))  # MSE for Adjusted Density Predictions (rho_pred - rho_true - noise)^2
 
+        # L_5
         MSEv2_list = [F.mse_loss(self.v[i], self.net_v(u_pred[i])) for i in range(len(self.v))] # L_5
         MSEv2 = torch.mean(torch.stack(MSEv2_list))  # MSE for Adjusted Density Predictions (rho_pred - rho_true - noise)^2
 
@@ -335,10 +348,10 @@ class NeuralNetwork(nn.Module):
         MSEgamma = self.gamma_var**2
 
         return {
-            # "MSEf": MSEf,
-            "MSEg": MSEg,
+            # "MSEf": MSEf/100,
+            # "MSEg": MSEg/100,
             "MSEv": MSEv,
-            "MSEgamma": MSEgamma
+            # "MSEgamma": MSEgamma
         }
 
         
@@ -361,8 +374,8 @@ class NeuralNetwork(nn.Module):
         loss_history = {}
         gamma_var_history = []
         noise_rho_bar_history = []
+        lambdas_history = {key: [] for key in self.lambdas.keys()}
 
-        # breakpoint()
 
         # Define the optimizer
         # all_params = list(self.density_network.parameters()) + list(self.velocity_network.parameters())
@@ -370,14 +383,16 @@ class NeuralNetwork(nn.Module):
         optimizer = optim.Adam([
             {'params': self.density_network.parameters()},
             {'params': self.velocity_network.parameters()},
-            {'params': [p for traj_net in self.trajectories_networks for p in traj_net.parameters()]}, # added this way sucht that it is optimized as well
-            {'params': self.noise_rho_bar}  # Assuming noise_rho_bar is a list of parameters/tensors
+            {'params': [p for traj_net in self.trajectories_networks for p in traj_net.parameters()]}, # added this way such that it is optimized as well
+            {'params': self.noise_rho_bar},  # Assuming noise_rho_bar is a list of parameters/tensors
+            {'params': [self.gamma_var]},
+            # {'params': self.lambdas.values()}
         ], lr=0.005)
         # optimizer = optim.Adam(list(self.parameters()) + [self.gamma_var] + [*self.noise_rho_bar], lr=0.005)
         # optimizer = optim.LBFGS(self.parameters(), lr=0.005)
        
         # Train the model
-        self.N_epochs = 4000
+        self.N_epochs = 6000
         # self.plot_density_loss_on_trajectory()
         with tqdm(total=self.N_epochs, desc="Training Progress") as pbar:
             for epoch in range(self.N_epochs):
@@ -385,7 +400,17 @@ class NeuralNetwork(nn.Module):
                 optimizer.zero_grad()
                 losses_data = self.calculate_data_losses()
                 losses_physics = self.calculate_physics_losses()
-                loss = sum(losses_data.values()) + sum(losses_physics.values())
+                losses = {**losses_data, **losses_physics}
+                # weighted_loss = {key: losses[key] * torch.sigmoid(self.lambdas[key]) for key in losses}
+
+                # breakpoint()
+                # loss = sum(losses_data.values()) + sum(losses_physics.values())
+                loss = sum(losses.values())
+                # if epoch < 4000:
+                #     loss = sum(losses_data.values())
+                # else:
+                #     loss = sum(losses.values())
+                    # loss = sum(weighted_loss.values())
                 # loss = sum([self.sigmas[i]*losses[key] for i, key in enumerate(losses.keys())])
   
                 loss.backward()
@@ -407,10 +432,12 @@ class NeuralNetwork(nn.Module):
                 gamma_var_history.append(self.gamma_var.item())
                 noise_rho_bar_history.append([tensor.item() for tensor in self.noise_rho_bar])
 
+                for key, value in self.lambdas.items():
+                    lambdas_history[key].append(torch.sigmoid(value).item())
+
                
-            # breakpoint()
             self.plot_density_loss_on_trajectory()
-            return loss_history, gamma_var_history, noise_rho_bar_history
+            return loss_history, gamma_var_history, noise_rho_bar_history, lambdas_history
         
      
     # build pytorch network    

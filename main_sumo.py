@@ -44,8 +44,8 @@ def plot_losses(loss_history):
     plt.show()
 
 
-def plot_parameters(gamma_var_history, noise_rho_bar_history):
-    fig, ax = plt.subplots(2, 1, figsize=(15, 10))
+def plot_parameters(gamma_var_history, noise_rho_bar_history, lambdas_history):
+    fig, ax = plt.subplots(3, 1, figsize=(15, 10))
     fig.suptitle('Parameter History')
 
     ax[0].plot(gamma_var_history)
@@ -59,6 +59,15 @@ def plot_parameters(gamma_var_history, noise_rho_bar_history):
     ax[1].set_xlabel('Epoch')
     ax[1].set_ylabel('Value')
     ax[1].grid(True)
+
+    for key, values in lambdas_history.items():
+        ax[2].plot(values, label=key)
+    # ax[2].plot(lambdas_history)
+    ax[2].set_title('lambdas_history')
+    ax[2].set_xlabel('Epoch')
+    ax[2].set_ylabel('Value')
+    ax[2].grid(True)
+    ax[2].legend()
 
     plt.tight_layout(rect=[0, 0.03, 1, 0.95])  # Adjust the layout to make room for the suptitle
     plt.show()
@@ -78,11 +87,11 @@ axisPlot = sumo.getAxisPlot()
 Vf = np.amax(v_train[14]) # find the highest speed in the training data\
 
 trained_neural_network = rn.ReconstructionNeuralNetwork(t_train, x_train, rho_train, v_train,
-                                                    L, Tmax, N_f=50, N_g=50, opt=9, v_max=Vf)
+                                                    L, Tmax, N_f=500, N_g=100, opt=9, v_max=Vf)
 
-loss_history, gamma_var_history, noise_rho_bar_history = trained_neural_network.train()
+loss_history, gamma_var_history, noise_rho_bar_history, lambdas_history = trained_neural_network.train()
 plot_losses(loss_history)
-plot_parameters(gamma_var_history, noise_rho_bar_history)
+plot_parameters(gamma_var_history, noise_rho_bar_history, lambdas_history)
 
 
 trained_neural_network.plot(axisPlot, rho)
