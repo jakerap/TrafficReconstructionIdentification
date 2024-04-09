@@ -102,6 +102,8 @@ class ReconstructionNeuralNetwork():
                                             max_speed=v_max, beta=0.05,
                                             N_epochs=300, N_lambda=10, 
                                             sigmas=sigmas, opt=opt) # Creation of the neural network
+        
+        self.neural_network.check_network_device()
             
     def createTrainingDataset(self, t, x, rho, v, v_max, L, Tmax, N_f, N_g, N_v):       
         '''
