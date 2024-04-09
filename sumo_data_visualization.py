@@ -36,7 +36,7 @@ t_f_train = X_f_train[:, 1:2] # time data points for the PDE [500, 1]
 # plt.ylim([-1, 1])
 # plt.grid()
 
-
+breakpoint()
 # plt.figure()
 # plt.plot(u_v_train, np.zeros_like(u_v_train), 'rx')
 # plt.ylabel('Velocity')

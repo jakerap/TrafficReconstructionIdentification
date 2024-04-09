@@ -11,6 +11,7 @@ import godunov as g
 import reconstruction_neural_network as rn
 from pyDOE import lhs
 import matplotlib.pyplot as plt
+import time
 
 #####################################
 ####     General parameters     #####
@@ -34,16 +35,26 @@ xiPos = L*lhs(1, samples=Npv).reshape((Npv,))
 xiPos = np.flip(np.sort(xiPos))
 xiT = np.array([0]*Npv)
 
+t0 = time.time()
+print("start simulation at time: ", t0)
+
 # Godunov simulation of the PDE
 simu_godunov = g.SimuGodunov(Vf, gamma, xiPos, xiT, L=L, Tmax=Tmax,
                              zMin=0, zMax=1, Nx=500, greenshield=greenshield,
                              rhoBar=rhoBar, rhoSigma=rhoSigma)
+
 rho = simu_godunov.simulation()
 simu_godunov.plot()
 axisPlot = simu_godunov.getAxisPlot()
 
 # collect data from PV
 t_train, x_train, rho_train, v_train = simu_godunov.getMeasurements(selectedPacket=-1, totalPacket=-1, noise=noise)
+
+t1 = time.time()
+print("end simulation at time: ", t1
+      , "duration: ", t1-t0, " seconds")
+
+breakpoint()
 
 trained_neural_network = rn.ReconstructionNeuralNetwork(t_train, x_train, rho_train, v_train,
                                                     L, Tmax, v_max=Vf, N_f=1000, N_g=50, N_v=30, opt=9)
