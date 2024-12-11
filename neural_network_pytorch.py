@@ -320,9 +320,9 @@ class NeuralNetwork(nn.Module):
     def calculate_data_losses(self):
 
         # Predictions
-        u_pred = [self.net_u(self.t[i], self.x[i]) - self.noise_rho_bar[i]*0 for i in range(len(self.t))] # list of tensors, since each tensor has a different shape
+        u_pred = [self.net_u(self.t[i], self.x[i]) - self.noise_rho_bar[i] for i in range(len(self.t))] # list of tensors, since each tensor has a different shape
         x_pred = [self.net_x_pv(self.t[i], i) for i in range(len(self.t))]  
-        u_pred_pv_position = [self.net_u(self.t[i], x_pred[i]) - self.noise_rho_bar[i]*0 for i in range(len(self.t))]
+        u_pred_pv_position = [self.net_u(self.t[i], x_pred[i]) - self.noise_rho_bar[i] for i in range(len(self.t))]
         v_pred = [self.net_v(self.u[i]) for i in range(len(self.t))]
 
         # L_2
@@ -347,7 +347,7 @@ class NeuralNetwork(nn.Module):
 
         return {
             "MSEu1": MSEu1,
-            # "MSEu2": MSEu2,
+            "MSEu2": MSEu2,
             "MSEtrajectories": MSEtrajectories,
             "MSEv1": MSEv1,
             "MSEv2": MSEv2
@@ -363,10 +363,10 @@ class NeuralNetwork(nn.Module):
         MSEgamma = self.gamma_var**2
 
         return {
-            # "MSEf": MSEf/100,
-            # "MSEg": MSEg/100,
+            "MSEf": MSEf,
+            "MSEg": MSEg,
             "MSEv": MSEv,
-            # "MSEgamma": MSEgamma
+            "MSEgamma": MSEgamma
         }
 
         
@@ -399,8 +399,8 @@ class NeuralNetwork(nn.Module):
             {'params': self.density_network.parameters()},
             {'params': self.velocity_network.parameters()},
             {'params': [p for traj_net in self.trajectories_networks for p in traj_net.parameters()]}, # added this way such that it is optimized as well
-            # {'params': self.noise_rho_bar},  # Assuming noise_rho_bar is a list of parameters/tensors
-            # {'params': [self.gamma_var]},
+            {'params': self.noise_rho_bar},  # Assuming noise_rho_bar is a list of parameters/tensors
+            {'params': [self.gamma_var]},
             # {'params': self.lambdas.values()}
         ], lr=0.005)
 
@@ -409,7 +409,7 @@ class NeuralNetwork(nn.Module):
         # optimizer = optim.LBFGS(self.parameters(), lr=0.005)
        
         # Train the model
-        self.N_epochs = 5000
+        self.N_epochs = 1000
         # self.plot_density_loss_on_trajectory()
         with tqdm(total=self.N_epochs, desc="Training Progress") as pbar:
             for epoch in range(self.N_epochs):
@@ -432,15 +432,26 @@ class NeuralNetwork(nn.Module):
                     loss = closure()
                 
                 else:
-                
+
                     optimizer.zero_grad()
                     losses_data = self.calculate_data_losses()
                     losses_physics = self.calculate_physics_losses()
                     losses = {**losses_data, **losses_physics}
+                    
+                    if epoch > self.N_epochs - 3000:
+                        loss = sum(losses.values())
+                        
+                    else:
+                        loss = sum(losses_data.values())
+
+                    loss = sum(losses.values())
+
+                    # loss = sum(losses_data.values())
+                    
                     # weighted_loss = {key: losses[key] * torch.sigmoid(self.lambdas[key]) for key in losses}
 
                     # loss = sum(losses_data.values()) + sum(losses_physics.values())
-                    loss = sum(losses.values())
+                    # loss = sum(losses.values())
                     # if epoch < 4000:
                     #     loss = sum(losses_data.values())
                     # else:
@@ -465,7 +476,7 @@ class NeuralNetwork(nn.Module):
                     loss_history[key].append(value.item())
                 
 
-                gamma_var_history.append(self.gamma_var.item())
+                gamma_var_history.append(self.gamma_var.item()**2)
                 noise_rho_bar_history.append([tensor.item() for tensor in self.noise_rho_bar])
 
                 for key, value in self.lambdas.items():

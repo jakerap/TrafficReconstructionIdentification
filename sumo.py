@@ -3,6 +3,12 @@ import numpy as np
 import matplotlib.pyplot as plt
 from matplotlib.animation import FuncAnimation
 import matplotlib.colors as colors
+from mpl_toolkits.mplot3d import Axes3D
+import plotly.graph_objects as go
+# import plotly.express as px
+from scipy.interpolate import griddata
+
+
 
 
 class Sumo():
@@ -315,3 +321,56 @@ class Sumo():
             ax[i].set_title(f'Time: {t}')
         plt.tight_layout()
         plt.show()
+
+
+    def plotDensity3D(self):
+        # breakpoint()
+        time = np.linspace(0, 420, 420)
+        space = np.linspace(0, 250, 250)
+
+        # Create a meshgrid for space and time
+        space_grid, time_grid = np.meshgrid(space, time)
+
+        # Create a figure and a 3D subplot
+        fig = plt.figure()
+        ax = fig.add_subplot(111, projection='3d')
+
+        # Plotting the surface plot
+        surf = ax.plot_surface(space_grid, time_grid, self.u.T, cmap='rainbow')
+
+        # Add a color bar which maps values to colors.
+        fig.colorbar(surf, shrink=0.5, aspect=5)
+
+        plt.title('Density Surface Plot')
+        ax.set_xlabel('Space')
+        ax.set_ylabel('Time')
+        ax.set_zlabel('Density')
+
+        # Show plot
+        plt.show()
+
+    def plotDensity3Dplotly(self):
+        # breakpoint()
+        time = np.linspace(0, 420, 420)
+        space = np.linspace(0, 250, 250)
+
+        # Create a meshgrid for space and time
+        space_grid, time_grid = np.meshgrid(space, time)
+
+        fig = go.Figure(data=[go.Surface(z=self.u, x=time_grid, y=space_grid, colorscale='Viridis')])
+
+        # Update plot layout
+        fig.update_layout(
+            title='Density Surface Plot',
+            scene=dict(
+                xaxis_title='Time',
+                yaxis_title='Space',
+                zaxis_title='Density'
+            ),
+            autosize=False,
+            width=800,
+            height=600
+        )
+
+        # Show plot
+        fig.show()
